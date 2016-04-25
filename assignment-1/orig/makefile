@@ -20,6 +20,8 @@ FETCH_FILES = $(EXEC),callgraph.pdf,communication.pdf
 # Remote directories
 BEAGLE_DIR=/home/root/esLAB/matMULT
 ESL_DIR=/data/home/in4342-03/embedded-systems-lab/assignment-1/orig
+REMOTE_BB=root@192.168.0.202
+REMOTE_ESL=in4342-03@ce-eslab.ewi.tudelft.nl
 
 all: $(EXEC)
 
@@ -57,22 +59,22 @@ gprof: compile4gprof
 ############# REMOTE STUFF ################
 # Fetch the files from remote
 fetch:
-	scp in4342-03@ce-eslab.ewi.tudelft.nl:$(ESL_DIR)/{$(FETCH_FILES)} ./
+	scp $(REMOTE_ESL):$(ESL_DIR)/{$(FETCH_FILES)} ./
 
 # Build it remote
 remote:
-	scp ./* in4342-03@ce-eslab.ewi.tudelft.nl:$(ESL_DIR)/
-	ssh -C in4342-03@ce-eslab.ewi.tudelft.nl "cd $(ESL_DIR); make clean && make CROSS_COMPILE=1"
+	scp ./* $(REMOTE_ESL):$(ESL_DIR)/
+	ssh -C $(REMOTE_ESL) "cd $(ESL_DIR); make clean && make CROSS_COMPILE=1"
 
 # Build it remote
 remote-prof:
-	scp ./* in4342-03@ce-eslab.ewi.tudelft.nl:$(ESL_DIR)/
-	ssh -C in4342-03@ce-eslab.ewi.tudelft.nl "cd $(ESL_DIR); make clean && make mcprof"
-	ssh -C in4342-03@ce-eslab.ewi.tudelft.nl "cd $(ESL_DIR); make clean && make gprof"
+	scp ./* $(REMOTE_ESL):$(ESL_DIR)/
+	ssh -C $(REMOTE_ESL) "cd $(ESL_DIR); make clean && make mcprof"
+	ssh -C $(REMOTE_ESL) "cd $(ESL_DIR); make clean && make gprof"
 
 # Send it trough SCP
 send: $(EXEC)
 	echo "Sending $(EXEC) to beagleboard ... "
-	scp $(EXEC) root@192.168.0.202:$(BEAGLE_DIR)/.
+	scp $(EXEC) $(REMOTE_BB):$(BEAGLE_DIR)/.
 
 .PHONY: all canny run clean send
