@@ -1,5 +1,5 @@
 PIN_DIR=$(PIN_ROOT)
-MCPROF_DIR=/data/home/in4342-01/mcprof
+MCPROF_DIR=/data/home/in4342-03/mcprof
 
 CC=gcc
 # Use the following (instead of gcc) for arm compiler
