@@ -1,7 +1,7 @@
 #include<stdio.h>
 #include "Timer.h"
 
-#define SIZE 16
+#define SIZE 128
 
 void matMult(int mat1[SIZE][SIZE], int mat2[SIZE][SIZE], int prod[SIZE][SIZE]);
 
@@ -32,7 +32,6 @@ int main()
     startTimer(&totalTime);
 	matMult(mat1,mat2,prod);
     stopTimer(&totalTime);
-    printTimer(&totalTime);	
 
 	for (i = 0;i < SIZE; i++)
 	{
@@ -43,7 +42,9 @@ int main()
 		}
 	}
 	
-	printf("\nDone !!! \n");
+	printf("\n\n");
+	printTimer(&totalTime);
+	printf("Done !!! \n");
 	return 0;
 }
 
