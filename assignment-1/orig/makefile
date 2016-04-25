@@ -1,9 +1,11 @@
-PIN_DIR=$(PIN_ROOT)
+PIN_DIR=/opt/pin-2.14-71313
 MCPROF_DIR=/data/home/in4342-03/mcprof
 
-CC=gcc
+CC?=gcc
 # Use the following (instead of gcc) for arm compiler
-# CC=/data/usr/local/share/codesourcery/bin/arm-none-linux-gnueabi-gcc
+ifeq ($(CROSS_COMPILE), 1)
+	CC =/opt/bbToolChain/usr/local/share/codesourcery/bin/arm-none-linux-gnueabi-gcc
+endif
 CFLAGS= -O3 -Wall
 LIBS= -lm
 LDFLAGS=
@@ -56,6 +58,17 @@ gprof: compile4gprof
 # Fetch the files from remote
 fetch:
 	scp in4342-03@ce-eslab.ewi.tudelft.nl:$(ESL_DIR)/{$(FETCH_FILES)} ./
+
+# Build it remote
+remote:
+	scp ./* in4342-03@ce-eslab.ewi.tudelft.nl:$(ESL_DIR)/
+	ssh -C in4342-03@ce-eslab.ewi.tudelft.nl "cd $(ESL_DIR); make clean && make CROSS_COMPILE=1"
+
+# Build it remote
+remote-prof:
+	scp ./* in4342-03@ce-eslab.ewi.tudelft.nl:$(ESL_DIR)/
+	ssh -C in4342-03@ce-eslab.ewi.tudelft.nl "cd $(ESL_DIR); make clean && make mcprof"
+	ssh -C in4342-03@ce-eslab.ewi.tudelft.nl "cd $(ESL_DIR); make clean && make gprof"
 
 # Send it trough SCP
 send: $(EXEC)
