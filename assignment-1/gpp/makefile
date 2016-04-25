@@ -132,6 +132,15 @@ DEFS :=        -DOS_LINUX            \
                -DDA8XXGEM            \
                -DDA8XXGEM_PHYINTERFACE=SHMEM_INTERFACE
 
+# Fetched files
+EXEC = $(BINDIR_R)/$(BIN)
+
+# Remote directories
+BEAGLE_DIR=/home/root/esLAB/assignment-1
+ESL_DIR=/data/home/in4342-03/embedded-systems-lab/assignment-1/gpp
+REMOTE_BB=root@192.168.0.202
+REMOTE_ESL=in4342-03@ce-eslab.ewi.tudelft.nl
+
 #   ----------------------------------------------------------------------------
 #   Compiler and Linker procedure
 #   From this point and on changes are very unlikely.
@@ -165,8 +174,21 @@ $(BINDIR_R)/$(BIN): $(OBJS_R)
 $(OBJDIR_R)/%.o : %.c
 	@$(BASE_TOOLCHAIN)/bin/$(CC) $(DEFS) $(ALL_CFLAGS) -o$@ $<
 
+
+############# REMOTE STUFF ################
+# Fetch the files from remote
+fetch:
+	scp $(REMOTE_ESL):$(ESL_DIR)/$(EXEC) ./Release/
+
+# Build it remote
+remote:
+	scp -r ./* $(REMOTE_ESL):$(ESL_DIR)/
+	ssh -C $(REMOTE_ESL) "cd $(ESL_DIR); make clean && make"
+
+# Send it trough SCP
 send:
-	scp $(BINDIR_R)/$(BIN) root@192.168.0.202:/home/root/esLAB/helloDSP/.
+	echo "Sending $(EXEC) to beagleboard ... "
+	scp $(EXEC) $(REMOTE_BB):$(BEAGLE_DIR)/.
 
 .PHONY: clean
 clean:
