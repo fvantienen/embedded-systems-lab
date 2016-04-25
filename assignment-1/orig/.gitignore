@@ -1,1 +1,10 @@
 matMult
+
+callgraph.dot
+callgraph.json
+callgraph.pdf
+communication.dot
+communication.pdf
+gprof.txt
+matrix.eps
+pin.log
