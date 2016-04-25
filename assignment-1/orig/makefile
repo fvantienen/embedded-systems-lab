@@ -12,8 +12,12 @@ CMD=./$(EXEC)
 CSRCS = matrixmult.c Timer.c
 OBJS = $(CSRCS:.c=.o)
 
-# make sure following dir exists on beagleboard
+# Fetched files
+FETCH_FILES = $(EXEC),callgraph.pdf,communication.pdf
+
+# Remote directories
 BEAGLE_DIR=/home/root/esLAB/matMULT
+ESL_DIR=/data/home/in4342-03/embedded-systems-lab/assignment-1/orig
 
 all: $(EXEC)
 
@@ -47,6 +51,11 @@ compile4gprof: clean $(EXEC)
 gprof: compile4gprof
 	$(CMD)
 	gprof -b $(EXEC) > gprof.txt
+
+############# REMOTE STUFF ################
+# Fetch the files from remote
+fetch:
+	scp in4342-03@ce-eslab.ewi.tudelft.nl:$(ESL_DIR)/{$(FETCH_FILES)} ./
 
 # Send it trough SCP
 send: $(EXEC)
