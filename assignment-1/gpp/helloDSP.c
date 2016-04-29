@@ -32,9 +32,6 @@ extern "C"
     /* Number of arguments specified to the DSP application. */
 #define NUM_ARGS 1
 
-    /* Argument size passed to the control message queue */
-#define ARG_SIZE 256
-
     /* ID of the POOL used by helloDSP. */
 #define SAMPLE_POOL_ID  0
 
@@ -42,18 +39,21 @@ extern "C"
 #define NUMMSGPOOLS     4
 
     /* Number of messages in each BUF pool. */
-#define NUMMSGINPOOL0   1
+#define NUMMSGINPOOL0   3
 #define NUMMSGINPOOL1   2
 #define NUMMSGINPOOL2   2
 #define NUMMSGINPOOL3   4
+
+    /* Matrix size */
+#define MATRIX_SIZE 32
 
     /* Control message data structure. */
     /* Must contain a reserved space for the header */
     typedef struct ControlMsg
     {
         MSGQ_MsgHeader header;
-        Uint16 command;
-        Char8 arg1[ARG_SIZE];
+        unsigned char command;
+        int matrix[MATRIX_SIZE][MATRIX_SIZE];
     } ControlMsg;
 
     /* Messaging buffer used by the application.
@@ -259,9 +259,8 @@ extern "C"
     {
         DSP_STATUS  status = DSP_SOK;
         Uint16 sequenceNumber = 0;
-        Uint16 msgId = 0;
-        Uint32 i;
-        ControlMsg *msg;
+        ControlMsg *in_matrix1, *in_matrix2, *out_matrix;
+        int i, j;
 
         SYSTEM_0Print("Entered helloDSP_Execute ()\n");
 
@@ -269,67 +268,87 @@ extern "C"
         SYSTEM_GetStartTime();
 #endif
 
-        for (i = 1 ; ((numIterations == 0) || (i <= (numIterations + 1))) && (DSP_SUCCEEDED (status)); i++)
+        // Send the first and second matrix
+        SYSTEM_0Print("Allocating\n");
+        status = MSGQ_alloc(SAMPLE_POOL_ID, APP_BUFFER_SIZE, (MSGQ_Msg*) &in_matrix1);
+        SYSTEM_0Print("Done allocating\n");
+        if (DSP_SUCCEEDED(status))
         {
-            /* Receive the message. */
-            status = MSGQ_get(SampleGppMsgq, WAIT_FOREVER, (MsgqMsg *) &msg);
+            MSGQ_setMsgId(in_matrix1, sequenceNumber);
+            in_matrix1->command = 0x1;
+
+            for (i = 0;i < MATRIX_SIZE; i++)
+                for (j = 0; j < MATRIX_SIZE; j++)
+                    in_matrix1->matrix[i][j] = 1;
+
+            status = MSGQ_put(SampleDspMsgq, (MsgqMsg) in_matrix1);
             if (DSP_FAILED(status))
             {
-                SYSTEM_1Print("MSGQ_get () failed. Status = [0x%x]\n", status);
+                MSGQ_free((MsgqMsg) in_matrix1);
+                SYSTEM_1Print("MSGQ_put () failed. Status = [0x%x]\n", status);
+                return status;
             }
-#if defined (VERIFY_DATA)
-            /* Verify correctness of data received. */
-            if (DSP_SUCCEEDED(status))
+            else {
+                SYSTEM_0Print("Send first matrix...\n");
+            }
+        } else {
+            SYSTEM_0Print("Could not allocate first matrix\n");
+        }
+
+
+        SYSTEM_0Print("Allocating\n");
+        status = MSGQ_alloc(SAMPLE_POOL_ID, APP_BUFFER_SIZE, (MSGQ_Msg*) &in_matrix2);
+        SYSTEM_0Print("Done allocating\n");
+        if (DSP_SUCCEEDED(status))
+        {
+            MSGQ_setMsgId(in_matrix2, ++sequenceNumber);
+            in_matrix2->command = 0x2;
+            for (i = 0;i < MATRIX_SIZE; i++)
+                for (j = 0; j < MATRIX_SIZE; j++)
+                    in_matrix2->matrix[i][j] = 2;
+
+            status = MSGQ_put(SampleDspMsgq, (MsgqMsg) in_matrix2);
+            if (DSP_FAILED(status))
             {
-                status = helloDSP_VerifyData(msg, sequenceNumber);
-                if (DSP_FAILED(status))
-                {
-                    MSGQ_free((MsgqMsg) msg);
-                }
+                MSGQ_free((MsgqMsg) in_matrix2);
+                SYSTEM_1Print("MSGQ_put () failed. Status = [0x%x]\n", status);
+                return status;
             }
-#endif
+            else {
+                SYSTEM_0Print("Send second matrix...\n");
+            }
+        }
 
-            if (msg->command == 0x01)
-                SYSTEM_1Print("Message received: %s\n", (Uint32) msg->arg1);
-            else if (msg->command == 0x02)
-                SYSTEM_1Print("Message received: %s\n", (Uint32) msg->arg1);
+        /* Receive the message. */
+        SYSTEM_0Print("Receiving message\n");
+        status = MSGQ_get(SampleGppMsgq, WAIT_FOREVER, (MsgqMsg *) &out_matrix);
+        if (DSP_FAILED(status))
+        {
+            SYSTEM_1Print("MSGQ_get () failed. Status = [0x%x]\n", status);
+        }
+        else if (DSP_SUCCEEDED(status))
+        {
+            SYSTEM_1Print("Succesfully got matrix back!!! (%d)\n", out_matrix->command);
 
-            /* If the message received is the final one, free it. */
-            if ((numIterations != 0) && (i == (numIterations + 1)))
+            for (i = 0;i < MATRIX_SIZE; i++)
+            {
+                for (j = 0; j < MATRIX_SIZE; j++)
+                    SYSTEM_1Print("%d ", out_matrix->matrix[i][j]);
+                SYSTEM_0Print("\n");
+            }
+
+            MSGQ_free((MsgqMsg) out_matrix);
+        }
+
+        /* Verify correctness of data received. */
+        /*if (DSP_SUCCEEDED(status))
+        {
+            status = helloDSP_VerifyData(msg, sequenceNumber);
+            if (DSP_FAILED(status))
             {
                 MSGQ_free((MsgqMsg) msg);
             }
-            else
-            {
-                /* Send the same message received in earlier MSGQ_get () call. */
-                if (DSP_SUCCEEDED(status))
-                {
-                    msgId = MSGQ_getMsgId(msg);
-                    MSGQ_setMsgId(msg, msgId);
-                    status = MSGQ_put(SampleDspMsgq, (MsgqMsg) msg);
-                    if (DSP_FAILED(status))
-                    {
-                        MSGQ_free((MsgqMsg) msg);
-                        SYSTEM_1Print("MSGQ_put () failed. Status = [0x%x]\n", status);
-                    }
-                }
-
-                sequenceNumber++;
-                /* Make sure that the sequenceNumber stays within the permitted
-                 * range for applications. */
-                if (sequenceNumber == MSGQ_INTERNALIDSSTART)
-                {
-                    sequenceNumber = 0;
-                }
-
-#if !defined (PROFILE)
-                if (DSP_SUCCEEDED(status) && ((i % 100) == 0))
-                {
-                    SYSTEM_1Print("Transferred %ld messages\n", i);
-                }
-#endif
-            }
-        }
+        }*/
 
 #if defined (PROFILE)
         if (DSP_SUCCEEDED(status))

@@ -39,8 +39,8 @@ extern "C" {
  *
  *  @field  sequenceNumber
  *              Expected id from the GPP.
- *  @field  numTransfers
- *              Number of message to be transferred between GPP and DSP.
+ *  @field  matrixSize
+ *              The matrix size
  *  @field  localMsgq
  *              Handle of opened message queue.
  *  @field  locatedMsgqHandle
@@ -51,7 +51,7 @@ extern "C" {
  */
 typedef struct TSKMESSAGE_TransferInfo_tag {
     Uint16     sequenceNumber;
-    Uint16     numTransfers;
+    Uint16     matrixSize;
     MSGQ_Queue localMsgq;
     MSGQ_Queue locatedMsgq;
     SEM_Obj    notifySemObj;

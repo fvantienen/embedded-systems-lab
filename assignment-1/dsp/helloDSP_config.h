@@ -42,16 +42,16 @@ extern "C" {
 /* ID of the POOL used by helloDSP. */
 #define SAMPLE_POOL_ID      0
 
-/* Argument size passed to the control message queue */
-#define ARG_SIZE 256
+/* Matrix size */
+#define MATRIX_SIZE 32
 
 /* Control message data structure. */
 /* Must contain a reserved space for the header */
 typedef struct ControlMsg 
 {
     MSGQ_MsgHeader header;
-    Uint16 command;
-    Char arg1[ARG_SIZE];
+    unsigned char command;
+   	int matrix[MATRIX_SIZE][MATRIX_SIZE];
 } ControlMsg;
 
 /* Messaging buffer used by the application.
@@ -69,7 +69,7 @@ typedef struct ControlMsg
 #define NUM_MSG_POOLS      4
 
 /* Number of messages in each BUF pool. */
-#define NUM_MSG_IN_POOL0   1
+#define NUM_MSG_IN_POOL0   3
 #define NUM_MSG_IN_POOL1   2
 #define NUM_MSG_IN_POOL2   2
 #define NUM_MSG_IN_POOL3   4
