@@ -1,12 +1,11 @@
 /** ============================================================================
- *  @file   helloDSP.c
+ *  @file   matrixMult.c
  *
  *  @path
  *
- *  @desc   This is an application which sends messages to the DSP
- *          processor and receives them back using DSP/BIOS LINK.
- *          The message contents received are verified against the data
- *          sent to DSP.
+ *  @desc   This is an application which 2 matrics to the DSP
+ *          processor and receives the multiplciat back using
+ *          DSP/BIOS LINK.
  *
 */
 /*  ----------------------------------- DSP/BIOS Link                   */
@@ -18,7 +17,7 @@
 #include <pool.h>
 
 /*  ----------------------------------- Application Header              */
-#include <helloDSP.h>
+#include <matrixMult.h>
 #include <system_os.h>
 
 #include <stdio.h>
@@ -32,28 +31,27 @@ extern "C"
     /* Number of arguments specified to the DSP application. */
 #define NUM_ARGS 1
 
-    /* Argument size passed to the control message queue */
-#define ARG_SIZE 256
-
-    /* ID of the POOL used by helloDSP. */
+    /* ID of the POOL used by matrixMult. */
 #define SAMPLE_POOL_ID  0
 
     /*  Number of BUF pools in the entire memory pool */
 #define NUMMSGPOOLS     4
 
     /* Number of messages in each BUF pool. */
-#define NUMMSGINPOOL0   1
+#define NUMMSGINPOOL0   3
 #define NUMMSGINPOOL1   2
 #define NUMMSGINPOOL2   2
 #define NUMMSGINPOOL3   4
+
+    /* Matrix size */
+#define MATRIX_SIZE 100
 
     /* Control message data structure. */
     /* Must contain a reserved space for the header */
     typedef struct ControlMsg
     {
         MSGQ_MsgHeader header;
-        Uint16 command;
-        Char8 arg1[ARG_SIZE];
+        int matrix[MATRIX_SIZE][MATRIX_SIZE];
     } ControlMsg;
 
     /* Messaging buffer used by the application.
@@ -113,32 +111,32 @@ extern "C"
 
 #if defined (VERIFY_DATA)
     /** ============================================================================
-     *  @func   helloDSP_VerifyData
+     *  @func   matrixMult_VerifyData
      *
      *  @desc   This function verifies the data-integrity of given message.
      *  ============================================================================
      */
-    STATIC NORMAL_API DSP_STATUS helloDSP_VerifyData(IN MSGQ_Msg msg, IN Uint16 sequenceNumber);
+    STATIC NORMAL_API DSP_STATUS matrixMult_VerifyData(ControlMsg *matrix1, ControlMsg *matrix2, ControlMsg *out, IN Uint32 matrixSize);
 #endif
 
 
     /** ============================================================================
-     *  @func   helloDSP_Create
+     *  @func   matrixMult_Create
      *
      *  @desc   This function allocates and initializes resources used by
      *          this application.
      *
-     *  @modif  helloDSP_InpBufs , helloDSP_OutBufs
+     *  @modif  matrixMult_InpBufs , matrixMult_OutBufs
      *  ============================================================================
      */
-    NORMAL_API DSP_STATUS helloDSP_Create(IN Char8* dspExecutable, IN Char8* strNumIterations, IN Uint8 processorId)
+    NORMAL_API DSP_STATUS matrixMult_Create(IN Char8* dspExecutable, IN Char8* strMatrixSize, IN Uint8 processorId)
     {
         DSP_STATUS status = DSP_SOK;
         Uint32 numArgs = NUM_ARGS;
         MSGQ_LocateAttrs syncLocateAttrs;
         Char8* args[NUM_ARGS];
 
-        SYSTEM_0Print("Entered helloDSP_Create ()\n");
+        SYSTEM_0Print("Entered matrixMult_Create ()\n");
 
         /* Create and initialize the proc object. */
         status = PROC_setup(NULL);
@@ -190,7 +188,7 @@ extern "C"
         /* Load the executable on the DSP. */
         if (DSP_SUCCEEDED(status))
         {
-            args [0] = strNumIterations;
+            args [0] = strMatrixSize;
             {
                 status = PROC_load(processorId, dspExecutable, numArgs, args);
             }
@@ -242,114 +240,122 @@ extern "C"
             }
         }
 
-        SYSTEM_0Print("Leaving helloDSP_Create ()\n");
+        SYSTEM_0Print("Leaving matrixMult_Create ()\n");
         return status;
     }
 
 
     /** ============================================================================
-     *  @func   helloDSP_Execute
+     *  @func   matrixMult_Execute
      *
      *  @desc   This function implements the execute phase for this application.
      *
      *  @modif  None
      *  ============================================================================
      */
-    NORMAL_API DSP_STATUS helloDSP_Execute(IN Uint32 numIterations, Uint8 processorId)
+    NORMAL_API DSP_STATUS matrixMult_Execute(IN Uint32 matrixSize, Uint8 processorId)
     {
         DSP_STATUS  status = DSP_SOK;
-        Uint16 sequenceNumber = 0;
-        Uint16 msgId = 0;
-        Uint32 i;
-        ControlMsg *msg;
+        ControlMsg *in_matrix1, *in_matrix2, *out_matrix;
+        int i, j;
 
-        SYSTEM_0Print("Entered helloDSP_Execute ()\n");
+        SYSTEM_0Print("Entered matrixMult_Execute ()\n");
+
+        // Allocate the matrices
+        status = MSGQ_alloc(SAMPLE_POOL_ID, APP_BUFFER_SIZE, (MSGQ_Msg*) &in_matrix1);
+        if (DSP_FAILED(status)) {
+            SYSTEM_0Print("Could not allocate first matrix!\n");
+            return status;
+        }
+
+        status = MSGQ_alloc(SAMPLE_POOL_ID, APP_BUFFER_SIZE, (MSGQ_Msg*) &in_matrix2);
+        if (DSP_FAILED(status)) {
+            SYSTEM_0Print("Could not allocate second matrix!\n");
+            return status;
+        }
+
+        // Setup first matrix
+        MSGQ_setMsgId(in_matrix1, 0x1);
+        for (i = 0; i < matrixSize; i++)
+            for (j = 0; j < matrixSize; j++)
+                in_matrix1->matrix[i][j] = i + j*2;
+
+        // Setup second matrix
+        MSGQ_setMsgId(in_matrix2, 0x2);
+        for (i = 0; i < matrixSize; i++)
+            for (j = 0; j < matrixSize; j++)
+                in_matrix2->matrix[i][j] = i + j*3;
 
 #if defined (PROFILE)
         SYSTEM_GetStartTime();
 #endif
 
-        for (i = 1 ; ((numIterations == 0) || (i <= (numIterations + 1))) && (DSP_SUCCEEDED (status)); i++)
+        /* Send the matrices */
+        status = MSGQ_put(SampleDspMsgq, (MsgqMsg) in_matrix1);
+        if (DSP_FAILED(status))
         {
-            /* Receive the message. */
-            status = MSGQ_get(SampleGppMsgq, WAIT_FOREVER, (MsgqMsg *) &msg);
-            if (DSP_FAILED(status))
-            {
-                SYSTEM_1Print("MSGQ_get () failed. Status = [0x%x]\n", status);
-            }
-#if defined (VERIFY_DATA)
-            /* Verify correctness of data received. */
-            if (DSP_SUCCEEDED(status))
-            {
-                status = helloDSP_VerifyData(msg, sequenceNumber);
-                if (DSP_FAILED(status))
-                {
-                    MSGQ_free((MsgqMsg) msg);
-                }
-            }
-#endif
+            MSGQ_free((MsgqMsg) in_matrix1);
+            SYSTEM_1Print("MSGQ_put () failed. Status = [0x%x]\n", status);
+            return status;
+        }
 
-            if (msg->command == 0x01)
-                SYSTEM_1Print("Message received: %s\n", (Uint32) msg->arg1);
-            else if (msg->command == 0x02)
-                SYSTEM_1Print("Message received: %s\n", (Uint32) msg->arg1);
+        status = MSGQ_put(SampleDspMsgq, (MsgqMsg) in_matrix2);
+        if (DSP_FAILED(status))
+        {
+            MSGQ_free((MsgqMsg) in_matrix2);
+            SYSTEM_1Print("MSGQ_put () failed. Status = [0x%x]\n", status);
+            return status;
+        }
 
-            /* If the message received is the final one, free it. */
-            if ((numIterations != 0) && (i == (numIterations + 1)))
-            {
-                MSGQ_free((MsgqMsg) msg);
-            }
-            else
-            {
-                /* Send the same message received in earlier MSGQ_get () call. */
-                if (DSP_SUCCEEDED(status))
-                {
-                    msgId = MSGQ_getMsgId(msg);
-                    MSGQ_setMsgId(msg, msgId);
-                    status = MSGQ_put(SampleDspMsgq, (MsgqMsg) msg);
-                    if (DSP_FAILED(status))
-                    {
-                        MSGQ_free((MsgqMsg) msg);
-                        SYSTEM_1Print("MSGQ_put () failed. Status = [0x%x]\n", status);
-                    }
-                }
-
-                sequenceNumber++;
-                /* Make sure that the sequenceNumber stays within the permitted
-                 * range for applications. */
-                if (sequenceNumber == MSGQ_INTERNALIDSSTART)
-                {
-                    sequenceNumber = 0;
-                }
-
-#if !defined (PROFILE)
-                if (DSP_SUCCEEDED(status) && ((i % 100) == 0))
-                {
-                    SYSTEM_1Print("Transferred %ld messages\n", i);
-                }
-#endif
-            }
+        /* Receive the answer */
+        status = MSGQ_get(SampleGppMsgq, WAIT_FOREVER, (MsgqMsg *) &out_matrix);
+        if (DSP_FAILED(status))
+        {
+            SYSTEM_1Print("MSGQ_get () failed. Status = [0x%x]\n", status);
+            return status;
         }
 
 #if defined (PROFILE)
-        if (DSP_SUCCEEDED(status))
+        SYSTEM_GetEndTime();
+#endif
+
+        /* Print the answer */
+        SYSTEM_1Print("Answer(%d): \n", MSGQ_getMsgId((MSGQ_Msg) out_matrix));
+        for (i = 0;i < matrixSize; i++)
         {
-            SYSTEM_GetEndTime();
-            SYSTEM_GetProfileInfo(numIterations);
+            for (j = 0; j < matrixSize; j++)
+                SYSTEM_1Print("%d ", out_matrix->matrix[i][j]);
+            SYSTEM_0Print("\n");
+        }
+
+#if defined (PROFILE)
+        SYSTEM_GetProfileInfo(matrixSize);
+#endif
+
+#if defined (VERIFY_DATA)
+        /* Verify correctness of data received. */
+        status = matrixMult_VerifyData(in_matrix1, in_matrix2, out_matrix, matrixSize);
+        if (DSP_FAILED(status))
+        {
+            SYSTEM_0Print("Verification succesfull!\n");
+        }
+        else
+        {
+            SYSTEM_0Print("Verification failed!\n");
         }
 #endif
 
-        SYSTEM_0Print("Leaving helloDSP_Execute ()\n");
-
+        MSGQ_free((MsgqMsg) out_matrix);
+        SYSTEM_0Print("Leaving matrixMult_Execute ()\n");
         return status;
     }
 
 
     /** ============================================================================
-     *  @func   helloDSP_Delete
+     *  @func   matrixMult_Delete
      *
      *  @desc   This function releases resources allocated earlier by call to
-     *          helloDSP_Create ().
+     *          matrixMult_Create ().
      *          During cleanup, the allocated resources are being freed
      *          unconditionally. Actual applications may require stricter check
      *          against return values for robustness.
@@ -357,12 +363,12 @@ extern "C"
      *  @modif  None
      *  ============================================================================
      */
-    NORMAL_API Void helloDSP_Delete(Uint8 processorId)
+    NORMAL_API Void matrixMult_Delete(Uint8 processorId)
     {
         DSP_STATUS status = DSP_SOK;
         DSP_STATUS tmpStatus = DSP_SOK;
 
-        SYSTEM_0Print("Entered helloDSP_Delete ()\n");
+        SYSTEM_0Print("Entered matrixMult_Delete ()\n");
 
         /* Release the remote message queue */
         status = MSGQ_release(SampleDspMsgq);
@@ -429,34 +435,34 @@ extern "C"
             SYSTEM_1Print("PROC_destroy () failed. Status = [0x%x]\n", status);
         }
 
-        SYSTEM_0Print("Leaving helloDSP_Delete ()\n");
+        SYSTEM_0Print("Leaving matrixMult_Delete ()\n");
     }
 
 
     /** ============================================================================
-     *  @func   helloDSP_Main
+     *  @func   matrixMult_Main
      *
      *  @desc   Entry point for the application
      *
      *  @modif  None
      *  ============================================================================
      */
-    NORMAL_API Void helloDSP_Main(IN Char8* dspExecutable, IN Char8* strNumIterations, IN Char8* strProcessorId)
+    NORMAL_API Void matrixMult_Main(IN Char8* dspExecutable, IN Char8* strMatrixSize, IN Char8* strProcessorId)
     {
         DSP_STATUS status = DSP_SOK;
-        Uint32 numIterations = 0;
+        Uint32 matrixSize = 0;
         Uint8 processorId = 0;
 
-        SYSTEM_0Print ("========== Sample Application : helloDSP ==========\n");
+        SYSTEM_0Print ("========== matrixMult: Matrix multiplication ==========\n");
 
-        if ((dspExecutable != NULL) && (strNumIterations != NULL))
+        if ((dspExecutable != NULL) && (strMatrixSize != NULL))
         {
-            numIterations = SYSTEM_Atoi(strNumIterations);
+            matrixSize = SYSTEM_Atoi(strMatrixSize);
 
-            if (numIterations > 0xFFFF)
+            if (matrixSize > 100 || matrixSize < 1)
             {
                 status = DSP_EINVALIDARG;
-                SYSTEM_1Print("ERROR! Invalid arguments specified for helloDSP application.\n Max iterations = %d\n", 0xFFFF);
+                SYSTEM_2Print("ERROR! Invalid arguments specified for matrixMult application.\n Min matrix size is %d and max is %d\n", 1, 100);
             }
             else
             {
@@ -470,49 +476,52 @@ extern "C"
                 /* Specify the dsp executable file name for message creation phase. */
                 if (DSP_SUCCEEDED(status))
                 {
-                    status = helloDSP_Create(dspExecutable, strNumIterations, processorId);
+                    status = matrixMult_Create(dspExecutable, strMatrixSize, processorId);
 
                     /* Execute the message execute phase. */
                     if (DSP_SUCCEEDED(status))
                     {
-                        status = helloDSP_Execute(numIterations, processorId);
+                        status = matrixMult_Execute(matrixSize, processorId);
                     }
 
                     /* Perform cleanup operation. */
-                    helloDSP_Delete(processorId);
+                    matrixMult_Delete(processorId);
                 }
             }
         }
         else
         {
             status = DSP_EINVALIDARG;
-            SYSTEM_0Print("ERROR! Invalid arguments specified for helloDSP application\n");
+            SYSTEM_0Print("ERROR! Invalid arguments specified for matrixMult application\n");
         }
         SYSTEM_0Print ("====================================================\n");
     }
 
 #if defined (VERIFY_DATA)
     /** ============================================================================
-     *  @func   helloDSP_VerifyData
+     *  @func   matrixMult_VerifyData
      *
-     *  @desc   This function verifies the data-integrity of given buffer.
+     *  @desc   This function verifies the data-integrity of the matrix.
      *
      *  @modif  None
      *  ============================================================================
      */
-    STATIC NORMAL_API DSP_STATUS helloDSP_VerifyData(IN MSGQ_Msg msg, IN Uint16 sequenceNumber)
+    STATIC NORMAL_API DSP_STATUS matrixMult_VerifyData(ControlMsg *matrix1, ControlMsg *matrix2, ControlMsg *out, IN Uint32 matrixSize)
     {
+        int i, j, k;
         DSP_STATUS status = DSP_SOK;
-        Uint16 msgId;
 
-        /* Verify the message */
-        msgId = MSGQ_getMsgId(msg.header);
-        if (msgId != sequenceNumber)
+        for (i = 0;i < matrixSize; i++)
         {
-            status = DSP_EFAIL;
-            SYSTEM_0Print("ERROR! Data integrity check failed\n");
+            for (j = 0; j < matrixSize; j++)
+            {
+                for(k=0; k < matrixSize; k++)
+                {
+                    if(out->matrix[i][j] != (matrix1->matrix[i][k] * matrix2->matrix[k][j]))
+                        status = DSP_EFAIL;
+                }
+            }
         }
-
         return status;
     }
 #endif /* if defined (VERIFY_DATA) */

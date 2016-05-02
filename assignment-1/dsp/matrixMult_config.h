@@ -1,9 +1,9 @@
 /** ============================================================================
- *  @file   helloDSP_config.h
+ *  @file   matrixMult_config.h
  *
  *  @path   
  *
- *  @desc   Header file for MSGQ and POOL configurations for helloDSP.
+ *  @desc   Header file for MSGQ and POOL configurations for matrixMult.
  *
  *  @ver    1.10
  *  ============================================================================
@@ -15,15 +15,15 @@
  */
 
 
-#if !defined (helloDSP_CONFIG_)
-#define helloDSP_CONFIG_
+#if !defined (MATRIXMULT_CONFIG_)
+#define MATRIXMULT_CONFIG_
 
 #if defined (__cplusplus)
 extern "C" {
 #endif /* defined (__cplusplus) */
 
 /*  ----------------------------------- DSP/BIOS Headers            */
-#include "helloDSPcfg.h"
+#include "matrixMultcfg.h"
 #include <msgq.h>
 #include <pool.h>
 
@@ -39,19 +39,18 @@ extern "C" {
 #define GPP_MSGQNAME        "GPPMSGQ1"
 #define DSP_MSGQNAME        "DSPMSGQ"
 
-/* ID of the POOL used by helloDSP. */
+/* ID of the POOL used by matrixMult. */
 #define SAMPLE_POOL_ID      0
 
-/* Argument size passed to the control message queue */
-#define ARG_SIZE 256
+/* Matrix size */
+#define MATRIX_SIZE 100
 
 /* Control message data structure. */
 /* Must contain a reserved space for the header */
 typedef struct ControlMsg 
 {
     MSGQ_MsgHeader header;
-    Uint16 command;
-    Char arg1[ARG_SIZE];
+   	int matrix[MATRIX_SIZE][MATRIX_SIZE];
 } ControlMsg;
 
 /* Messaging buffer used by the application.
@@ -69,7 +68,7 @@ typedef struct ControlMsg
 #define NUM_MSG_POOLS      4
 
 /* Number of messages in each BUF pool. */
-#define NUM_MSG_IN_POOL0   1
+#define NUM_MSG_IN_POOL0   3
 #define NUM_MSG_IN_POOL1   2
 #define NUM_MSG_IN_POOL2   2
 #define NUM_MSG_IN_POOL3   4
@@ -78,4 +77,4 @@ typedef struct ControlMsg
 #if defined (__cplusplus)
 }
 #endif /* defined (__cplusplus) */
-#endif /* !defined (helloDSP_CONFIG_) */
+#endif /* !defined (MATRIXMULT_CONFIG_) */

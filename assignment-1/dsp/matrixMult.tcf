@@ -1,9 +1,9 @@
 /** ============================================================================
- *  @file   helloDSP.tcf
+ *  @file   matrixMult.tcf
  *
  *  @path   
  *
- *  @desc   Configuration file for the helloDSP example.
+ *  @desc   Configuration file for the matrixMult.
  *          This file defines platform-specific configuration details.
  *
  *  @ver    1.10
@@ -21,7 +21,7 @@
  *  ============================================================================
  */
 utils.importFile("dsplink-omap3530-base.tci");
-utils.importFile("helloDSP.tci");
+utils.importFile("matrixMult.tci");
 
 /*  ============================================================================
  *  MEM : IRAM, L1DSRAM

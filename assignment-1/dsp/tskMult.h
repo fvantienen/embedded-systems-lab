@@ -17,8 +17,8 @@
  */
 
 
-#ifndef TSKMESSAGE_
-#define TSKMESSAGE_
+#ifndef TSKMULT_
+#define TSKMULT_
 
 
 /*  ----------------------------------- DSP/BIOS Headers            */
@@ -32,15 +32,13 @@ extern "C" {
 
 
 /** ============================================================================
- *  @name   TSKMESSAGE_TransferInfo
+ *  @name   TSKMULT_TransferInfo
  *
  *  @desc   Structure used to keep various information needed by various phases
  *          of the application.
  *
- *  @field  sequenceNumber
- *              Expected id from the GPP.
- *  @field  numTransfers
- *              Number of message to be transferred between GPP and DSP.
+ *  @field  matrixSize
+ *              The matrix size
  *  @field  localMsgq
  *              Handle of opened message queue.
  *  @field  locatedMsgqHandle
@@ -49,19 +47,18 @@ extern "C" {
  *              Semaphore used for message notification.
  *  ============================================================================
  */
-typedef struct TSKMESSAGE_TransferInfo_tag {
-    Uint16     sequenceNumber;
-    Uint16     numTransfers;
+typedef struct TSKMULT_TransferInfo_tag {
+    Uint16     matrixSize;
     MSGQ_Queue localMsgq;
     MSGQ_Queue locatedMsgq;
     SEM_Obj    notifySemObj;
-} TSKMESSAGE_TransferInfo;
+} TSKMULT_TransferInfo;
 
 
 /** ============================================================================
- *  @func   TSKMESSAGE_create
+ *  @func   TSKMULT_create
  *
- *  @desc   Create phase function of TSKMESSAGE application.
+ *  @desc   Create phase function of TSKMULT application.
  *
  *  @arg    transferInfo
  *              Information for transfer.
@@ -78,12 +75,12 @@ typedef struct TSKMESSAGE_TransferInfo_tag {
  *  @see    None
  *  ============================================================================
  */
-Int TSKMESSAGE_create(TSKMESSAGE_TransferInfo** transferInfo);
+Int TSKMULT_create(TSKMULT_TransferInfo** transferInfo);
 
 /** ============================================================================
- *  @func   TSKMESSAGE_execute
+ *  @func   TSKMULT_execute
  *
- *  @desc   Excecute phase function of TSKMESSAGE application.
+ *  @desc   Excecute phase function of TSKMULT application.
  *
  *  @arg    transferInfo
  *              Information for transfer.
@@ -100,12 +97,12 @@ Int TSKMESSAGE_create(TSKMESSAGE_TransferInfo** transferInfo);
  *  @see    None
  *  ============================================================================
  */
-Int TSKMESSAGE_execute(TSKMESSAGE_TransferInfo* transferInfo);
+Int TSKMULT_execute(TSKMULT_TransferInfo* transferInfo);
 
 /** ============================================================================
- *  @func   TSKMESSAGE_delete
+ *  @func   TSKMULT_delete
  *
- *  @desc   Delete phase function of TSKMESSAGE application.
+ *  @desc   Delete phase function of TSKMULT application.
  *
  *  @arg    transferInfo
  *              Information for transfer.
@@ -122,7 +119,7 @@ Int TSKMESSAGE_execute(TSKMESSAGE_TransferInfo* transferInfo);
  *  @see    None
  *  ============================================================================
  */
-Int TSKMESSAGE_delete(TSKMESSAGE_TransferInfo* transferInfo);
+Int TSKMULT_delete(TSKMULT_TransferInfo* transferInfo);
 
 
 #ifdef __cplusplus
@@ -130,4 +127,4 @@ Int TSKMESSAGE_delete(TSKMESSAGE_TransferInfo* transferInfo);
 #endif /* extern "C" */
 
 
-#endif /* TSKMESSAGE_ */
+#endif /* TSKMULT_ */
