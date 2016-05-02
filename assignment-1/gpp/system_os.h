@@ -275,7 +275,7 @@ extern "C"
      *  @see    None
      *  ============================================================================
      */
-    NORMAL_API Void SYSTEM_GetProfileInfo(Uint32 numIterations);
+    NORMAL_API Void SYSTEM_GetProfileInfo(Uint32 matrixSize, Uint8 percentage);
 
 #endif /* if defined (PROFILE) */
 

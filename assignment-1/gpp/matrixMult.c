@@ -350,7 +350,7 @@ extern "C"
         }
 
 #if defined (PROFILE)
-        SYSTEM_GetProfileInfo(matrixSize);
+        SYSTEM_GetProfileInfo(matrixSize, percentage);
 #endif
 
 #if defined (VERIFY_DATA)

@@ -108,8 +108,7 @@ extern "C"
      */
     NORMAL_API Void SYSTEM_1Sprint(Char8* str, Char8* format, Uint32 arg)
     {
-        if(quietPrint == 0)
-            sprintf(str, format, arg);
+        sprintf(str, format, arg);
     }
 
     /** ============================================================================
@@ -122,8 +121,7 @@ extern "C"
      */
     NORMAL_API Void SYSTEM_2Sprint(Char8* str, Char8* format, Uint32 arg1, Uint32 arg2)
     {
-        if(quietPrint == 0)
-            sprintf(str, format, arg1, arg2);
+        sprintf(str, format, arg1, arg2);
     }
 
     /** ============================================================================
@@ -277,7 +275,7 @@ extern "C"
      */
     NORMAL_API
     Void
-    SYSTEM_GetProfileInfo(Uint32 matrixSize)
+    SYSTEM_GetProfileInfo(Uint32 matrixSize, Uint8 percentage)
     {
         Uint32 usecTimeTaken = 0;
         Real32 numSeconds = 0;
@@ -291,12 +289,13 @@ extern "C"
         {
             quietPrint = 0;
             SYSTEM_1Print("%d,", matrixSize);
+            SYSTEM_1Print("%d,", percentage);
             SYSTEM_1Print("%d\n", (Real32)(usecTimeTaken % 1000000));
             quietPrint = 1;
         }
         else 
         {
-            SYSTEM_1Print("Calculating matrix of size %d took ", matrixSize);
+            SYSTEM_2Print("Calculating matrix of size %d for %d\% on the DSP took ", matrixSize, percentage);
             SYSTEM_1Print("%d seconds ", numSeconds);
             SYSTEM_1Print("%d microseconds.\n", (Real32)(usecTimeTaken % 1000000));
         }
