@@ -41,6 +41,8 @@ Uint8 dspMsgQName[DSP_MAX_STRLEN];
 
 /* The matrix size */
 extern Uint16 matrix_size;
+/* The percentage to run */
+extern Uint16 percentage;
 
 
 /** ============================================================================
@@ -180,7 +182,7 @@ Int TSKMULT_execute(TSKMULT_TransferInfo* info)
         if (MSGQ_getMsgId((MSGQ_Msg) msg) == 0x2)
         {
             /* Do the matrix calculation */
-            for (i = 0;i < matrix_size; i++)
+            for (i = matrix_size * percentage / 100;i < matrix_size; i++)
             {
                 for (j = 0; j < matrix_size; j++)
                 {
