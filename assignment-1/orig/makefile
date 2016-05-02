@@ -20,8 +20,14 @@ FETCH_FILES = $(EXEC),callgraph.pdf,communication.pdf
 # Remote directories
 BEAGLE_DIR=/home/root/esLAB/assignment-1
 ESL_DIR=/data/home/in4342-03/embedded-systems-lab/assignment-1/orig
-REMOTE_BB=root@192.168.0.202
+REMOTE_BB?=root@192.168.0.202
 REMOTE_ESL=in4342-03@ce-eslab.ewi.tudelft.nl
+
+PORT?=22
+ifeq ($(R), 1)
+	PORT=2230
+	REMOTE_BB=root@localhost
+endif
 
 all: $(EXEC)
 
@@ -75,6 +81,6 @@ remote-prof:
 # Send it trough SCP
 send: $(EXEC)
 	echo "Sending $(EXEC) to beagleboard ... "
-	scp $(EXEC) $(REMOTE_BB):$(BEAGLE_DIR)/.
+	scp -P$(PORT) $(EXEC) $(REMOTE_BB):$(BEAGLE_DIR)/.
 
 .PHONY: all canny run clean send
