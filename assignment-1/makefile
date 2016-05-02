@@ -18,6 +18,6 @@ send:
 	cd orig; make send; cd ..
 
 access:
-	ssh -R2230:$(REMOTE_BB):22 $(REMOTE_ESL)
+	ssh -R2230:$(REMOTE_BB):22 -L2230:localhost:2230 $(REMOTE_ESL)
 
 .PHONY: all gpp dsp orig send access
