@@ -24,6 +24,7 @@ extern "C"
 {
 #endif /* defined (__cplusplus) */
 
+    extern Uint8 quietPrint;
 
     /** ============================================================================
      *  @func   atoi

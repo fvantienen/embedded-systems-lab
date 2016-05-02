@@ -44,6 +44,14 @@ extern "C"
      */
     STATIC struct timeval initialUsecTime;
 
+    /** ============================================================================
+     *  @name   quietPrint
+     *
+     *  @desc   Whether or not to print debug information
+     *  ============================================================================
+     */
+    Uint8 quietPrint = 0;
+
 #endif /* if defined (PROFILE) */
 
 
@@ -57,7 +65,8 @@ extern "C"
      */
     NORMAL_API Void SYSTEM_0Print(Char8* str)
     {
-        printf(str);
+        if(!quietPrint)
+            printf(str);
     }
 
 
@@ -71,7 +80,8 @@ extern "C"
      */
     NORMAL_API Void SYSTEM_1Print(Char8* str, Uint32 arg)
     {
-        printf(str, arg);
+        if(!quietPrint)
+            printf(str, arg);
     }
 
     /** ============================================================================
@@ -84,7 +94,8 @@ extern "C"
      */
     NORMAL_API Void SYSTEM_2Print(Char8* str, Uint32 arg1, Uint32 arg2)
     {
-        printf(str, arg1, arg2);
+        if(!quietPrint)
+            printf(str, arg1, arg2);
     }
 
     /** ============================================================================
@@ -97,7 +108,8 @@ extern "C"
      */
     NORMAL_API Void SYSTEM_1Sprint(Char8* str, Char8* format, Uint32 arg)
     {
-        sprintf(str, format, arg);
+        if(!quietPrint)
+            sprintf(str, format, arg);
     }
 
     /** ============================================================================
@@ -110,7 +122,8 @@ extern "C"
      */
     NORMAL_API Void SYSTEM_2Sprint(Char8* str, Char8* format, Uint32 arg1, Uint32 arg2)
     {
-        sprintf(str, format, arg1, arg2);
+        if(!quietPrint)
+            sprintf(str, format, arg1, arg2);
     }
 
     /** ============================================================================
@@ -274,9 +287,19 @@ extern "C"
         /* To calculate number of seconds in usecTimeTaken */
         numSeconds = (Real32)((Real32) usecTimeTaken / 1000000.0);
 
-        SYSTEM_1Print("Calculating matrix of size %d took ", matrixSize);
-        SYSTEM_1Print("%d seconds ", numSeconds);
-        SYSTEM_1Print("%d microseconds.\n", (Real32)(usecTimeTaken % 1000000));
+        if(quietPrint)
+        {
+            quietPrint = 0;
+            SYSTEM_1Print("%d,", matrixSize);
+            SYSTEM_1Print("%d\n", (Real32)(usecTimeTaken % 1000000));
+            quietPrint = 1;
+        }
+        else 
+        {
+            SYSTEM_1Print("Calculating matrix of size %d took ", matrixSize);
+            SYSTEM_1Print("%d seconds ", numSeconds);
+            SYSTEM_1Print("%d microseconds.\n", (Real32)(usecTimeTaken % 1000000));
+        }
 
         return;
     }

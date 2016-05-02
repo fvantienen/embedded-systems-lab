@@ -37,10 +37,11 @@ extern "C"
         /*	long long _Fract value = atof("2.3");
         	printf("%k\n",value);	*/
 
-        if ((argc != 5) && (argc!=4) && (argc!=3))
+        if ((argc != 6) && (argc!=5) && (argc!=4) && (argc!=3))
         {
-            SYSTEM_1Print("Usage : %s <absolute path of DSP executable> <size of the matrix> <percentage on DSP> <DSP Processor Id>\n"
+            SYSTEM_1Print("Usage : %s <absolute path of DSP executable> <size of the matrix> <percentage on DSP> <quiet> <DSP Processor Id>\n"
                           "Default percetage is 100\%\n"
+                          "Quiet is 1 or 0\n"
                           "For DSP Processor Id,"
                           "\n\t use value of 0  if sample needs to be run on DSP 0 "
                           "\n\t use value of 1  if sample needs to be run on DSP 1"
@@ -63,16 +64,26 @@ extern "C"
               strPercentage = argv[3];
             }
 
-            /* Parse the processor ID */
+            /* Parse quiet */
             if (argc == 3 || argc == 4)
+            {
+              quietPrint = 0;
+            }
+            else
+            {
+              quietPrint = atoi(argv[4]);
+            }
+
+            /* Parse the processor ID */
+            if (argc == 3 || argc == 4 || argc == 5)
             {
                 strProcessorId = "0";
                 processorId = 0;
             }
             else
             {
-                strProcessorId = argv[4];
-                processorId = atoi(argv[4]);
+                strProcessorId = argv[5];
+                processorId = atoi(argv[5]);
             }
 
             /* If processor id and percentage is valid execute */
