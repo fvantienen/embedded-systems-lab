@@ -1,9 +1,9 @@
 /** ============================================================================
- *  @file   helloDSP_config.h
+ *  @file   matrixMult_config.h
  *
  *  @path   
  *
- *  @desc   Header file for MSGQ and POOL configurations for helloDSP.
+ *  @desc   Header file for MSGQ and POOL configurations for matrixMult.
  *
  *  @ver    1.10
  *  ============================================================================
@@ -15,15 +15,15 @@
  */
 
 
-#if !defined (helloDSP_CONFIG_)
-#define helloDSP_CONFIG_
+#if !defined (MATRIXMULT_CONFIG_)
+#define MATRIXMULT_CONFIG_
 
 #if defined (__cplusplus)
 extern "C" {
 #endif /* defined (__cplusplus) */
 
 /*  ----------------------------------- DSP/BIOS Headers            */
-#include "helloDSPcfg.h"
+#include "matrixMultcfg.h"
 #include <msgq.h>
 #include <pool.h>
 
@@ -39,7 +39,7 @@ extern "C" {
 #define GPP_MSGQNAME        "GPPMSGQ1"
 #define DSP_MSGQNAME        "DSPMSGQ"
 
-/* ID of the POOL used by helloDSP. */
+/* ID of the POOL used by matrixMult. */
 #define SAMPLE_POOL_ID      0
 
 /* Matrix size */
@@ -77,4 +77,4 @@ typedef struct ControlMsg
 #if defined (__cplusplus)
 }
 #endif /* defined (__cplusplus) */
-#endif /* !defined (helloDSP_CONFIG_) */
+#endif /* !defined (MATRIXMULT_CONFIG_) */

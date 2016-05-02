@@ -1,12 +1,11 @@
 /** ============================================================================
- *  @file   helloDSP.c
+ *  @file   matrixMult.c
  *
  *  @path
  *
- *  @desc   This is an application which sends messages to the DSP
- *          processor and receives them back using DSP/BIOS LINK.
- *          The message contents received are verified against the data
- *          sent to DSP.
+ *  @desc   This is an application which 2 matrics to the DSP
+ *          processor and receives the multiplciat back using
+ *          DSP/BIOS LINK.
  *
 */
 /*  ----------------------------------- DSP/BIOS Link                   */
@@ -18,7 +17,7 @@
 #include <pool.h>
 
 /*  ----------------------------------- Application Header              */
-#include <helloDSP.h>
+#include <matrixMult.h>
 #include <system_os.h>
 
 #include <stdio.h>
@@ -32,7 +31,7 @@ extern "C"
     /* Number of arguments specified to the DSP application. */
 #define NUM_ARGS 1
 
-    /* ID of the POOL used by helloDSP. */
+    /* ID of the POOL used by matrixMult. */
 #define SAMPLE_POOL_ID  0
 
     /*  Number of BUF pools in the entire memory pool */
@@ -112,7 +111,7 @@ extern "C"
 
 #if defined (VERIFY_DATA)
     /** ============================================================================
-     *  @func   helloDSP_VerifyData
+     *  @func   matrixMult_VerifyData
      *
      *  @desc   This function verifies the data-integrity of given message.
      *  ============================================================================
@@ -122,22 +121,22 @@ extern "C"
 
 
     /** ============================================================================
-     *  @func   helloDSP_Create
+     *  @func   matrixMult_Create
      *
      *  @desc   This function allocates and initializes resources used by
      *          this application.
      *
-     *  @modif  helloDSP_InpBufs , helloDSP_OutBufs
+     *  @modif  matrixMult_InpBufs , matrixMult_OutBufs
      *  ============================================================================
      */
-    NORMAL_API DSP_STATUS helloDSP_Create(IN Char8* dspExecutable, IN Char8* strMatrixSize, IN Uint8 processorId)
+    NORMAL_API DSP_STATUS matrixMult_Create(IN Char8* dspExecutable, IN Char8* strMatrixSize, IN Uint8 processorId)
     {
         DSP_STATUS status = DSP_SOK;
         Uint32 numArgs = NUM_ARGS;
         MSGQ_LocateAttrs syncLocateAttrs;
         Char8* args[NUM_ARGS];
 
-        SYSTEM_0Print("Entered helloDSP_Create ()\n");
+        SYSTEM_0Print("Entered matrixMult_Create ()\n");
 
         /* Create and initialize the proc object. */
         status = PROC_setup(NULL);
@@ -241,26 +240,26 @@ extern "C"
             }
         }
 
-        SYSTEM_0Print("Leaving helloDSP_Create ()\n");
+        SYSTEM_0Print("Leaving matrixMult_Create ()\n");
         return status;
     }
 
 
     /** ============================================================================
-     *  @func   helloDSP_Execute
+     *  @func   matrixMult_Execute
      *
      *  @desc   This function implements the execute phase for this application.
      *
      *  @modif  None
      *  ============================================================================
      */
-    NORMAL_API DSP_STATUS helloDSP_Execute(IN Uint32 matrixSize, Uint8 processorId)
+    NORMAL_API DSP_STATUS matrixMult_Execute(IN Uint32 matrixSize, Uint8 processorId)
     {
         DSP_STATUS  status = DSP_SOK;
         ControlMsg *in_matrix1, *in_matrix2, *out_matrix;
         int i, j;
 
-        SYSTEM_0Print("Entered helloDSP_Execute ()\n");
+        SYSTEM_0Print("Entered matrixMult_Execute ()\n");
 
         // Allocate the matrices
         status = MSGQ_alloc(SAMPLE_POOL_ID, APP_BUFFER_SIZE, (MSGQ_Msg*) &in_matrix1);
@@ -347,16 +346,16 @@ extern "C"
 #endif
 
         MSGQ_free((MsgqMsg) out_matrix);
-        SYSTEM_0Print("Leaving helloDSP_Execute ()\n");
+        SYSTEM_0Print("Leaving matrixMult_Execute ()\n");
         return status;
     }
 
 
     /** ============================================================================
-     *  @func   helloDSP_Delete
+     *  @func   matrixMult_Delete
      *
      *  @desc   This function releases resources allocated earlier by call to
-     *          helloDSP_Create ().
+     *          matrixMult_Create ().
      *          During cleanup, the allocated resources are being freed
      *          unconditionally. Actual applications may require stricter check
      *          against return values for robustness.
@@ -364,12 +363,12 @@ extern "C"
      *  @modif  None
      *  ============================================================================
      */
-    NORMAL_API Void helloDSP_Delete(Uint8 processorId)
+    NORMAL_API Void matrixMult_Delete(Uint8 processorId)
     {
         DSP_STATUS status = DSP_SOK;
         DSP_STATUS tmpStatus = DSP_SOK;
 
-        SYSTEM_0Print("Entered helloDSP_Delete ()\n");
+        SYSTEM_0Print("Entered matrixMult_Delete ()\n");
 
         /* Release the remote message queue */
         status = MSGQ_release(SampleDspMsgq);
@@ -436,19 +435,19 @@ extern "C"
             SYSTEM_1Print("PROC_destroy () failed. Status = [0x%x]\n", status);
         }
 
-        SYSTEM_0Print("Leaving helloDSP_Delete ()\n");
+        SYSTEM_0Print("Leaving matrixMult_Delete ()\n");
     }
 
 
     /** ============================================================================
-     *  @func   helloDSP_Main
+     *  @func   matrixMult_Main
      *
      *  @desc   Entry point for the application
      *
      *  @modif  None
      *  ============================================================================
      */
-    NORMAL_API Void helloDSP_Main(IN Char8* dspExecutable, IN Char8* strMatrixSize, IN Char8* strProcessorId)
+    NORMAL_API Void matrixMult_Main(IN Char8* dspExecutable, IN Char8* strMatrixSize, IN Char8* strProcessorId)
     {
         DSP_STATUS status = DSP_SOK;
         Uint32 matrixSize = 0;
@@ -477,16 +476,16 @@ extern "C"
                 /* Specify the dsp executable file name for message creation phase. */
                 if (DSP_SUCCEEDED(status))
                 {
-                    status = helloDSP_Create(dspExecutable, strMatrixSize, processorId);
+                    status = matrixMult_Create(dspExecutable, strMatrixSize, processorId);
 
                     /* Execute the message execute phase. */
                     if (DSP_SUCCEEDED(status))
                     {
-                        status = helloDSP_Execute(matrixSize, processorId);
+                        status = matrixMult_Execute(matrixSize, processorId);
                     }
 
                     /* Perform cleanup operation. */
-                    helloDSP_Delete(processorId);
+                    matrixMult_Delete(processorId);
                 }
             }
         }

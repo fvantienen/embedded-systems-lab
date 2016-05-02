@@ -3,7 +3,7 @@
 #
 #  @path   
 #
-#  @desc   Makefile for helloDSPgpp (Debug and Release versions)
+#  @desc   Makefile for matrixMultgpp (Debug and Release versions)
 #
 #  @ver    1.10
 #   ----------------------------------------------------------------------------
@@ -44,13 +44,13 @@ DSPLINK := /opt/bbToolChain/usr/local/share/bbframework/platform/beagle-linux/to
 #   ----------------------------------------------------------------------------
 #   General options, sources and libraries
 #   ----------------------------------------------------------------------------
-SRCS := helloDSP.c system_os.c main.c
+SRCS := matrixMult.c system_os.c main.c
 OBJS :=
 DEBUG :=
 LDFLAGS := -lpthread
 CFLAGS := -DPROFILE -DVERIFY_DATA
 LIBS :=
-BIN := helloDSPgpp
+BIN := matrixMultgpp
 
 #   ----------------------------------------------------------------------------
 #   Compiler and Linker flags for Debug

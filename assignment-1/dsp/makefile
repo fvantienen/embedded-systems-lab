@@ -3,7 +3,7 @@
 #
 #  @path   
 #
-#  @desc   Makefile for helloDSP (Debug and Release versions)
+#  @desc   Makefile for matrixMult (Debug and Release versions)
 #
 #  @ver    1.10
 #   ----------------------------------------------------------------------------
@@ -51,10 +51,10 @@ DSPLINK := /opt/bbToolChain/usr/local/share/bbframework/platform/beagle-linux/to
 #   This variable can be used to set all source/BIOS/object filenames
 #   For clarity, in this example it sets only the .OUT .CMD and .MAP filenames
 #   ----------------------------------------------------------------------------
-PROJNAME := helloDSP
+PROJNAME := matrixMult
 
 #   ----------------------------------------------------------------------------
-#   Global variables for building helloDSP
+#   Global variables for building matrixMult
 #   Note that common debug, compiler and linker flags are already
 #   set in the lower part of this Makefile
 #   CSRCS are for C-source files, ASRCS for asm and BIOSTCF is the BIOS TCF file
@@ -62,10 +62,9 @@ PROJNAME := helloDSP
 DEBUG :=
 CFLAGS := -I$(BASE_BSL)/dsp/include
 LDFLAGS := -i$(BASE_BSL)/dsp/lib
-#CSRCS := tskMessage.c helloDSP_config.c main.c led_test.c
-CSRCS := tskMessage.c helloDSP_config.c main.c 
+CSRCS := tskMult.c matrixMult_config.c main.c 
 ASRCS :=
-BIOSTCF := helloDSP.tcf
+BIOSTCF := matrixMult.tcf
 OBJS :=
 LIBS := -ldsplink.lib -ldsplinkpool.lib -ldsplinkmpcs.lib -ldsplinkmplist.lib -ldsplinkmsg.lib -ldsplinknotify.lib -ldsplinkringio.lib -ldsplinkdata.lib
 # If the DSP/Link was rebuilt by the user, add -ldsplinkdata.lib to the line above

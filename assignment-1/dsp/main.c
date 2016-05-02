@@ -1,5 +1,5 @@
 /*  ----------------------------------- DSP/BIOS Headers            */
-#include "helloDSPcfg.h"
+#include "matrixMultcfg.h"
 #include <sys.h>
 #include <sem.h>
 #include <msgq.h>
@@ -10,7 +10,7 @@
 #include <failure.h>
 
 /*  ----------------------------------- Sample Headers              */
-#include <tskMessage.h>
+#include <tskMult.h>
 
 /*  ----------------------------------- BSL Headers                 */
  
@@ -28,9 +28,9 @@ Uint16 matrix_size;
 /** ----------------------------------------------------------------------------
  *  @func   tskMessage
  *
- *  @desc   Task for TSK based TSKMESSAGE application.
+ *  @desc   Task for TSK based TSKMULT application.
  */
-static Int tskMessage();
+static Int tskMult();
 
 /** ============================================================================
  *  @func   atoi
@@ -52,7 +52,7 @@ extern int atoi(const char* str);
 Void main(Int argc, Char* argv [])
 {
     /* Task handler for TSK_create */
-    TSK_Handle tskMessageTask;
+    TSK_Handle tskMultTask;
 
 #if !defined (DSP_BOOTMODE_NOBOOT)
     /* Get the size of the matrix to be calculated by the application */
@@ -61,36 +61,36 @@ Void main(Int argc, Char* argv [])
     DSPLINK_init();
 #endif
 
-    /* Creating task for TSKMESSAGE application */
-    tskMessageTask = TSK_create(tskMessage, NULL, 0);
-    if (tskMessageTask == NULL)
+    /* Creating task for TSKMULT application */
+    tskMultTask = TSK_create(tskMult, NULL, 0);
+    if (tskMultTask == NULL)
     {
         SET_FAILURE_REASON(SYS_EALLOC);
-        LOG_printf(&trace, "Create TSKMESSAGE: Failed.\n");
+        LOG_printf(&trace, "Create TSKMULT: Failed.\n");
     }
 }
 
 /** ----------------------------------------------------------------------------
- *  @func   tskMessage
+ *  @func   tskMult
  *
- *  @desc   Task for TSK based TSKMESSAGE application.
+ *  @desc   Task for TSK based TSKMULT application.
  *
  *  @modif  None
  *  ----------------------------------------------------------------------------
  */
-static Int tskMessage()
+static Int tskMult()
 {
     Int status = SYS_OK;
-    TSKMESSAGE_TransferInfo* info;
+    TSKMULT_TransferInfo* info;
 
     /* Create Phase */
-    status = TSKMESSAGE_create(&info);
+    status = TSKMULT_create(&info);
 
     /* Execute Phase */
     if (status == SYS_OK)
     {
         /* Start the execution phase. */
-        status = TSKMESSAGE_execute(info);
+        status = TSKMULT_execute(info);
         if (status != SYS_OK)
         {
             SET_FAILURE_REASON(status);
@@ -98,7 +98,7 @@ static Int tskMessage()
     }
 
     /* Delete Phase */
-    status = TSKMESSAGE_delete(info);
+    status = TSKMULT_delete(info);
     if (status != SYS_OK)
     {
         SET_FAILURE_REASON(status);

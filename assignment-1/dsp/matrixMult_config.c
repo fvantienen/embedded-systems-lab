@@ -1,5 +1,5 @@
 /*  ----------------------------------- Sample Headers              */
-#include <helloDSP_config.h>
+#include <matrixMult_config.h>
 
 #if defined (__cplusplus)
 extern "C" {

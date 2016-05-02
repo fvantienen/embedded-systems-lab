@@ -9,7 +9,7 @@
 
 /*  ----------------------------------- Application Header            */
 #include <system_os.h>
-#include <helloDSP.h>
+#include <matrixMult.h>
 
 
 #if defined (__cplusplus)
@@ -38,7 +38,7 @@ extern "C"
 
         if ((argc != 4) && (argc!=3))
         {
-            SYSTEM_1Print("Usage : %s <absolute path of DSP executable> <number of transfers> <DSP Processor Id>\n"
+            SYSTEM_1Print("Usage : %s <absolute path of DSP executable> <size of the matrix> <DSP Processor Id>\n"
                           "For infinite transfers, use value of 0 for <number of transfers>\n"
                           "For DSP Processor Id,"
                           "\n\t use value of 0  if sample needs to be run on DSP 0 "
@@ -65,7 +65,7 @@ extern "C"
 
             if (processorId < MAX_PROCESSORS)
             {
-                helloDSP_Main(dspExecutable, strNumIterations, strProcessorId);
+                matrixMult_Main(dspExecutable, strNumIterations, strProcessorId);
             }
         }
 

@@ -1,5 +1,5 @@
 /** ============================================================================
- *  @file   tskMessage.c
+ *  @file   tskMult.c
  *
  *  @path   
  *
@@ -12,7 +12,7 @@
 
 
 /*  ----------------------------------- DSP/BIOS Headers            */
-#include "helloDSPcfg.h"
+#include "matrixMultcfg.h"
 #include <gbl.h>
 #include <sys.h>
 #include <sem.h>
@@ -25,8 +25,8 @@
 #include <failure.h>
 
 /*  ----------------------------------- Sample Headers              */
-#include <helloDSP_config.h>
-#include <tskMessage.h>
+#include <matrixMult_config.h>
+#include <tskMult.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -44,25 +44,25 @@ extern Uint16 matrix_size;
 
 
 /** ============================================================================
- *  @func   TSKMESSAGE_create
+ *  @func   TSKMULT_create
  *
- *  @desc   Create phase function for the TSKMESSAGE application. Initializes
- *          the TSKMESSAGE_TransferInfo structure with the information that will
+ *  @desc   Create phase function for the TSKMULT application. Initializes
+ *          the TSKMULT_TransferInfo structure with the information that will
  *          be used by the other phases of the application.
  *
  *  @modif  None.
  *  ============================================================================
  */
-Int TSKMESSAGE_create(TSKMESSAGE_TransferInfo** infoPtr)
+Int TSKMULT_create(TSKMULT_TransferInfo** infoPtr)
 {
     Int status = SYS_OK;
     MSGQ_Attrs msgqAttrs = MSGQ_ATTRS;
-    TSKMESSAGE_TransferInfo* info = NULL;
+    TSKMULT_TransferInfo* info = NULL;
     MSGQ_LocateAttrs syncLocateAttrs;
 
-    /* Allocate TSKMESSAGE_TransferInfo structure that will be initialized
+    /* Allocate TSKMULT_TransferInfo structure that will be initialized
      * and passed to other phases of the application */
-    *infoPtr = MEM_calloc(DSPLINK_SEGID, sizeof(TSKMESSAGE_TransferInfo), DSPLINK_BUF_ALIGN);
+    *infoPtr = MEM_calloc(DSPLINK_SEGID, sizeof(TSKMULT_TransferInfo), DSPLINK_BUF_ALIGN);
     if (*infoPtr == NULL)
     {
         status = SYS_EALLOC;
@@ -140,15 +140,15 @@ Int TSKMESSAGE_create(TSKMESSAGE_TransferInfo** infoPtr)
 
 
 /** ============================================================================
- *  @func   TSKMESSAGE_execute
+ *  @func   TSKMULT_execute
  *
- *  @desc   Execute phase function for the TSKMESSAGE application. Application
+ *  @desc   Execute phase function for the TSKMULT application. Application
  *          receives a message, verifies the id and executes the DSP processing.
  *
  *  @modif  None.
  *  ============================================================================
  */
-Int TSKMESSAGE_execute(TSKMESSAGE_TransferInfo* info)
+Int TSKMULT_execute(TSKMULT_TransferInfo* info)
 {
     Int status = SYS_OK;
     ControlMsg *msg, *first_message, *ret_matrix;
@@ -228,16 +228,16 @@ Int TSKMESSAGE_execute(TSKMESSAGE_TransferInfo* info)
 
 
 /** ============================================================================
- *  @func   TSKMESSAGE_delete
+ *  @func   TSKMULT_delete
  *
- *  @desc   Delete phase function for the TSKMESSAGE application. It deallocates
+ *  @desc   Delete phase function for the TSKMULT application. It deallocates
  *          all the resources of allocated during create phase of the
  *          application.
  *
  *  @modif  None.
  *  ============================================================================
  */
-Int TSKMESSAGE_delete(TSKMESSAGE_TransferInfo* info)
+Int TSKMULT_delete(TSKMULT_TransferInfo* info)
 {
     Int status = SYS_OK;
     Int tmpStatus = SYS_OK;
@@ -269,7 +269,7 @@ Int TSKMESSAGE_delete(TSKMESSAGE_TransferInfo* info)
     }
 
     /* Free the info structure */
-    freeStatus = MEM_free(DSPLINK_SEGID, info, sizeof(TSKMESSAGE_TransferInfo));
+    freeStatus = MEM_free(DSPLINK_SEGID, info, sizeof(TSKMULT_TransferInfo));
     if ((status == SYS_OK) && (freeStatus != TRUE))
     {
         status = SYS_EFREE;

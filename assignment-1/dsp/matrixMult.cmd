@@ -1,9 +1,9 @@
 /** ============================================================================
- *  @file   helloDSP.cmd
+ *  @file   matrixMult.cmd
  *
  *  @path   
  *
- *  @desc   Linker command file for the helloDSP example.
+ *  @desc   Linker command file for the matrixMult.
  *
  *  @ver    1.10
  *  ============================================================================
