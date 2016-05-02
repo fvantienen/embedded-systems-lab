@@ -141,6 +141,12 @@ ESL_DIR=/data/home/in4342-03/embedded-systems-lab/assignment-1/gpp
 REMOTE_BB=root@192.168.0.202
 REMOTE_ESL=in4342-03@ce-eslab.ewi.tudelft.nl
 
+PORT?=22
+ifeq ($(R), 1)
+	PORT=2230
+	REMOTE_BB=root@localhost
+endif
+
 #   ----------------------------------------------------------------------------
 #   Compiler and Linker procedure
 #   From this point and on changes are very unlikely.
@@ -188,7 +194,7 @@ remote:
 # Send it trough SCP
 send:
 	echo "Sending $(EXEC) to beagleboard ... "
-	scp $(EXEC) $(REMOTE_BB):$(BEAGLE_DIR)/.
+	scp -P$(PORT) $(EXEC) $(REMOTE_BB):$(BEAGLE_DIR)/.
 
 .PHONY: clean
 clean:

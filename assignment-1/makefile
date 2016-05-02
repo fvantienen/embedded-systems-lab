@@ -13,11 +13,14 @@ orig:
 	cd orig; make remote && make fetch; cd ..
 
 send:
-	cd dsp; make send; cd ..
-	cd gpp; make send; cd ..
-	cd orig; make send; cd ..
+	cd dsp; R=$(R) make send; cd ..
+	cd gpp; R=$(R) make send; cd ..
+	cd orig; R=$(R) make send; cd ..
 
 access:
-	ssh -R2230:$(REMOTE_BB):22 -L2230:localhost:2230 $(REMOTE_ESL)
+	ssh -R2230:$(REMOTE_BB):22 $(REMOTE_ESL)
 
-.PHONY: all gpp dsp orig send access
+conn:
+	ssh -L2230:localhost:2230 $(REMOTE_ESL)
+
+.PHONY: all gpp dsp orig send access conn
