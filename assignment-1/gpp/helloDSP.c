@@ -309,7 +309,6 @@ extern "C"
         }
 
         /* Receive the answer */
-        SYSTEM_0Print("Waiting for answer...\n");
         status = MSGQ_get(SampleGppMsgq, WAIT_FOREVER, (MsgqMsg *) &out_matrix);
         if (DSP_FAILED(status))
         {
@@ -317,8 +316,12 @@ extern "C"
             return status;
         }
 
-        SYSTEM_1Print("Answer(%d): \n", MSGQ_getMsgId((MSGQ_Msg) out_matrix));
+#if defined (PROFILE)
+        SYSTEM_GetEndTime();
+#endif
 
+        /* Print the answer */
+        SYSTEM_1Print("Answer(%d): \n", MSGQ_getMsgId((MSGQ_Msg) out_matrix));
         for (i = 0;i < matrixSize; i++)
         {
             for (j = 0; j < matrixSize; j++)
@@ -327,7 +330,6 @@ extern "C"
         }
 
 #if defined (PROFILE)
-        SYSTEM_GetEndTime();
         SYSTEM_GetProfileInfo(matrixSize);
 #endif
 
@@ -343,10 +345,9 @@ extern "C"
             SYSTEM_0Print("Verification failed!\n");
         }
 #endif
+
         MSGQ_free((MsgqMsg) out_matrix);
-
         SYSTEM_0Print("Leaving helloDSP_Execute ()\n");
-
         return status;
     }
 
