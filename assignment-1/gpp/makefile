@@ -48,7 +48,7 @@ SRCS := helloDSP.c system_os.c main.c
 OBJS :=
 DEBUG :=
 LDFLAGS := -lpthread
-CFLAGS := -DPROFILE
+CFLAGS := -DPROFILE -DVERIFY_DATA
 LIBS :=
 BIN := helloDSPgpp
 

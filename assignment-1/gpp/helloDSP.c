@@ -117,7 +117,7 @@ extern "C"
      *  @desc   This function verifies the data-integrity of given message.
      *  ============================================================================
      */
-    STATIC NORMAL_API DSP_STATUS matrixMult_VerifyData(IN MSGQ_Msg matrix1, IN MSGQ_Msg matrix2, IN MSGQ_Msg out, IN Uint32 matrixSize);
+    STATIC NORMAL_API DSP_STATUS matrixMult_VerifyData(ControlMsg *matrix1, ControlMsg *matrix2, ControlMsg *out, IN Uint32 matrixSize);
 #endif
 
 
@@ -336,6 +336,10 @@ extern "C"
         status = matrixMult_VerifyData(in_matrix1, in_matrix2, out_matrix, matrixSize);
         if (DSP_FAILED(status))
         {
+            SYSTEM_0Print("Verification succesfull!\n");
+        }
+        else
+        {
             SYSTEM_0Print("Verification failed!\n");
         }
 #endif
@@ -502,8 +506,9 @@ extern "C"
      *  @modif  None
      *  ============================================================================
      */
-    STATIC NORMAL_API DSP_STATUS matrixMult_VerifyData(IN MSGQ_Msg matrix1, IN MSGQ_Msg matrix2, IN MSGQ_Msg out, IN Uint32 matrixSize)
+    STATIC NORMAL_API DSP_STATUS matrixMult_VerifyData(ControlMsg *matrix1, ControlMsg *matrix2, ControlMsg *out, IN Uint32 matrixSize)
     {
+        int i, j, k;
         DSP_STATUS status = DSP_SOK;
 
         for (i = 0;i < matrixSize; i++)
@@ -513,7 +518,7 @@ extern "C"
                 for(k=0; k < matrixSize; k++)
                 {
                     if(out->matrix[i][j] != (matrix1->matrix[i][k] * matrix2->matrix[k][j]))
-                        status = DSP_FAILED;
+                        status = DSP_EFAIL;
                 }
             }
         }
