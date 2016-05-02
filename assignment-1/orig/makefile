@@ -18,7 +18,7 @@ OBJS = $(CSRCS:.c=.o)
 FETCH_FILES = $(EXEC),callgraph.pdf,communication.pdf
 
 # Remote directories
-BEAGLE_DIR=/home/root/esLAB/matMULT
+BEAGLE_DIR=/home/root/esLAB/assignment-1
 ESL_DIR=/data/home/in4342-03/embedded-systems-lab/assignment-1/orig
 REMOTE_BB=root@192.168.0.202
 REMOTE_ESL=in4342-03@ce-eslab.ewi.tudelft.nl

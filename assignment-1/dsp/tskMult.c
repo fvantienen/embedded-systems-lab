@@ -123,21 +123,6 @@ Int TSKMULT_create(TSKMULT_TransferInfo** infoPtr)
     return status;
 }
 
-/* Matrix multiplication */
-/*void matMult(ControlMsg *mat1, ControlMsg *mat2, ControlMsg *prod)
-{
-    int i, j, k;
-    for (i = 0;i < MATRIX_SIZE; i++)
-    {
-        for (j = 0; j < MATRIX_SIZE; j++)
-        {
-            prod->matrix[i][j]=0;
-            for(k=0;k<MATRIX_SIZE;k++)
-                prod->matrix[i][j] = prod->matrix[i][j] + mat1->matrix[i][k] * mat2->matrix[k][j];
-        }
-    }
-}*/
-
 
 /** ============================================================================
  *  @func   TSKMULT_execute
@@ -154,16 +139,29 @@ Int TSKMULT_execute(TSKMULT_TransferInfo* info)
     ControlMsg *msg, *first_message, *ret_matrix;
     int i, j, k;
 
+    /* Allocate the result message */
+    status = MSGQ_alloc(SAMPLE_POOL_ID, (MSGQ_Msg*) &ret_matrix, APP_BUFFER_SIZE);
+    if (status != SYS_OK)
+    {
+        SET_FAILURE_REASON(status);
+        return status;
+    }
+
+    // Set the message information
+    MSGQ_setMsgId((MSGQ_Msg) ret_matrix, 0x3);
+    MSGQ_setSrcQueue((MSGQ_Msg) ret_matrix, info->localMsgq);
+
     do {
         /* Receive a message from the GPP */
         status = MSGQ_get(info->localMsgq,(MSGQ_Msg*) &msg, SYS_FOREVER);
         if (status != SYS_OK)
         {
             SET_FAILURE_REASON (status);
+            return status;
         }
 
         /* Check if the message is an asynchronous error message */
-        else if (MSGQ_getMsgId((MSGQ_Msg) msg) == MSGQ_ASYNCERRORMSGID)
+        if (MSGQ_getMsgId((MSGQ_Msg) msg) == MSGQ_ASYNCERRORMSGID)
         {
 #if !defined (LOG_COMPONENT)
             LOG_printf(&trace, "Transport error Type = %d",((MSGQ_AsyncErrorMsg *) msg)->errorType);
@@ -181,20 +179,7 @@ Int TSKMULT_execute(TSKMULT_TransferInfo* info)
         /* Got the second matrix thus do the calculation */
         if (MSGQ_getMsgId((MSGQ_Msg) msg) == 0x2)
         {
-            // Allocate the result message
-            status = MSGQ_alloc(SAMPLE_POOL_ID, (MSGQ_Msg*) &ret_matrix, APP_BUFFER_SIZE);
-            if (status != SYS_OK)
-            {
-                /* Must free the first and second message */
-                MSGQ_free((MSGQ_Msg) first_message);
-                MSGQ_free((MSGQ_Msg) msg);
-
-                SET_FAILURE_REASON(status);
-                return status;
-            }
-
-            // Do the calculation
-            //matMult(first_message, msg, ret_matrix);
+            /* Do the matrix calculation */
             for (i = 0;i < matrix_size; i++)
             {
                 for (j = 0; j < matrix_size; j++)
@@ -205,20 +190,18 @@ Int TSKMULT_execute(TSKMULT_TransferInfo* info)
                 }
             }
 
-            /* Must free the first and second message */
-            MSGQ_free((MSGQ_Msg) first_message);
-            MSGQ_free((MSGQ_Msg) msg);
-
-            // Set the message information
-            MSGQ_setMsgId((MSGQ_Msg) ret_matrix, 0x3);
-            MSGQ_setSrcQueue((MSGQ_Msg) ret_matrix, info->localMsgq);
-
             /* Send the message back to the GPP */
             status = MSGQ_put(info->locatedMsgq,(MSGQ_Msg) ret_matrix);
             if (status != SYS_OK)
             {
+                MSGQ_free((MSGQ_Msg) ret_matrix);
                 SET_FAILURE_REASON(status);
             }
+
+            /* Must free the first and second message */
+            MSGQ_free((MSGQ_Msg) first_message);
+            MSGQ_free((MSGQ_Msg) msg);
+
             return status;
         }
     } while(status == SYS_OK);
