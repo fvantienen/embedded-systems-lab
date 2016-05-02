@@ -43,14 +43,13 @@ extern "C" {
 #define SAMPLE_POOL_ID      0
 
 /* Matrix size */
-#define MATRIX_SIZE 32
+#define MATRIX_SIZE 100
 
 /* Control message data structure. */
 /* Must contain a reserved space for the header */
 typedef struct ControlMsg 
 {
     MSGQ_MsgHeader header;
-    unsigned char command;
    	int matrix[MATRIX_SIZE][MATRIX_SIZE];
 } ControlMsg;
 

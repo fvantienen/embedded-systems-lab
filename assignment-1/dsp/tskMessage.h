@@ -37,8 +37,6 @@ extern "C" {
  *  @desc   Structure used to keep various information needed by various phases
  *          of the application.
  *
- *  @field  sequenceNumber
- *              Expected id from the GPP.
  *  @field  matrixSize
  *              The matrix size
  *  @field  localMsgq
@@ -50,7 +48,6 @@ extern "C" {
  *  ============================================================================
  */
 typedef struct TSKMESSAGE_TransferInfo_tag {
-    Uint16     sequenceNumber;
     Uint16     matrixSize;
     MSGQ_Queue localMsgq;
     MSGQ_Queue locatedMsgq;
