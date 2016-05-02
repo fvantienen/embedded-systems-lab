@@ -286,10 +286,6 @@ extern "C"
             for (j = 0; j < matrixSize; j++)
                 in_matrix2->matrix[i][j] = i + j*3;
 
-#if defined (PROFILE)
-        SYSTEM_GetStartTime();
-#endif
-
         /* Send the matrices */
         status = MSGQ_put(SampleDspMsgq, (MsgqMsg) in_matrix1);
         if (DSP_FAILED(status))
@@ -307,6 +303,9 @@ extern "C"
             return status;
         }
 
+#if defined (PROFILE)
+        SYSTEM_GetStartTime();
+#endif
         /* Receive the answer */
         status = MSGQ_get(SampleGppMsgq, WAIT_FOREVER, (MsgqMsg *) &out_matrix);
         if (DSP_FAILED(status))
