@@ -65,7 +65,7 @@ extern "C"
      */
     NORMAL_API Void SYSTEM_0Print(Char8* str)
     {
-        if(!quietPrint)
+        if(quietPrint == 0)
             printf(str);
     }
 
@@ -80,7 +80,7 @@ extern "C"
      */
     NORMAL_API Void SYSTEM_1Print(Char8* str, Uint32 arg)
     {
-        if(!quietPrint)
+        if(quietPrint == 0)
             printf(str, arg);
     }
 
@@ -94,7 +94,7 @@ extern "C"
      */
     NORMAL_API Void SYSTEM_2Print(Char8* str, Uint32 arg1, Uint32 arg2)
     {
-        if(!quietPrint)
+        if(quietPrint == 0)
             printf(str, arg1, arg2);
     }
 
@@ -108,7 +108,7 @@ extern "C"
      */
     NORMAL_API Void SYSTEM_1Sprint(Char8* str, Char8* format, Uint32 arg)
     {
-        if(!quietPrint)
+        if(quietPrint == 0)
             sprintf(str, format, arg);
     }
 
@@ -122,7 +122,7 @@ extern "C"
      */
     NORMAL_API Void SYSTEM_2Sprint(Char8* str, Char8* format, Uint32 arg1, Uint32 arg2)
     {
-        if(!quietPrint)
+        if(quietPrint == 0)
             sprintf(str, format, arg1, arg2);
     }
 
@@ -287,7 +287,7 @@ extern "C"
         /* To calculate number of seconds in usecTimeTaken */
         numSeconds = (Real32)((Real32) usecTimeTaken / 1000000.0);
 
-        if(quietPrint)
+        if(quietPrint == 1)
         {
             quietPrint = 0;
             SYSTEM_1Print("%d,", matrixSize);
