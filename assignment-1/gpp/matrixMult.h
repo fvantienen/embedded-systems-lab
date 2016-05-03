@@ -51,7 +51,7 @@ extern "C"
      *  @see    matrixMult_Delete
      *  ============================================================================
      */
-    NORMAL_API DSP_STATUS matrixMult_Create (IN Char8* dspExecutable, IN Char8* strNumIterations, IN Uint8 processorId);
+    NORMAL_API DSP_STATUS matrixMult_Create (IN Char8* dspExecutable, IN Char8* strNumIterations, IN Char8* strPercentage, IN Uint8 processorId);
 
 
     /** ============================================================================
@@ -77,7 +77,7 @@ extern "C"
      *  @see    matrixMult_Delete , matrixMult_Create
      *  ============================================================================
      */
-    NORMAL_API DSP_STATUS matrixMult_Execute(IN Uint32 numIterations, IN Uint8 processorId);
+    NORMAL_API DSP_STATUS matrixMult_Execute(IN Uint32 matrixSize, IN Uint8 percentage, Uint8 processorId);
 
 
     /** ============================================================================
@@ -131,7 +131,7 @@ extern "C"
      *  @see    matrixMult_Create, matrixMult_Execute, matrixMult_Delete
      *  ============================================================================
      */
-    NORMAL_API Void matrixMult_Main(IN Char8* dspExecutable, IN Char8* strNumIterations, IN Char8* strProcessorId);
+    NORMAL_API Void matrixMult_Main(IN Char8* dspExecutable, IN Char8* strMatrixSize, IN Char8* strPercentage, IN Char8* strProcessorId);
 
 
 #if defined (DA8XXGEM)

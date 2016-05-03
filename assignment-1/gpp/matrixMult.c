@@ -21,6 +21,7 @@
 #include <system_os.h>
 
 #include <stdio.h>
+#include <stdlib.h>
 
 
 #if defined (__cplusplus)
@@ -29,7 +30,7 @@ extern "C"
 #endif /* defined (__cplusplus) */
 
     /* Number of arguments specified to the DSP application. */
-#define NUM_ARGS 1
+#define NUM_ARGS 2
 
     /* ID of the POOL used by matrixMult. */
 #define SAMPLE_POOL_ID  0
@@ -129,7 +130,7 @@ extern "C"
      *  @modif  matrixMult_InpBufs , matrixMult_OutBufs
      *  ============================================================================
      */
-    NORMAL_API DSP_STATUS matrixMult_Create(IN Char8* dspExecutable, IN Char8* strMatrixSize, IN Uint8 processorId)
+    NORMAL_API DSP_STATUS matrixMult_Create(IN Char8* dspExecutable, IN Char8* strMatrixSize, IN Char8* strPercentage, IN Uint8 processorId)
     {
         DSP_STATUS status = DSP_SOK;
         Uint32 numArgs = NUM_ARGS;
@@ -188,7 +189,8 @@ extern "C"
         /* Load the executable on the DSP. */
         if (DSP_SUCCEEDED(status))
         {
-            args [0] = strMatrixSize;
+            args[0] = strMatrixSize;
+            args[1] = strPercentage;
             {
                 status = PROC_load(processorId, dspExecutable, numArgs, args);
             }
@@ -253,11 +255,11 @@ extern "C"
      *  @modif  None
      *  ============================================================================
      */
-    NORMAL_API DSP_STATUS matrixMult_Execute(IN Uint32 matrixSize, Uint8 processorId)
+    NORMAL_API DSP_STATUS matrixMult_Execute(IN Uint32 matrixSize, IN Uint8 percentage, Uint8 processorId)
     {
         DSP_STATUS  status = DSP_SOK;
-        ControlMsg *in_matrix1, *in_matrix2, *out_matrix;
-        int i, j;
+        ControlMsg *in_matrix1, *in_matrix2, *out_matrix, *own_matrix;
+        int i, j, k;
 
         SYSTEM_0Print("Entered matrixMult_Execute ()\n");
 
@@ -273,6 +275,8 @@ extern "C"
             SYSTEM_0Print("Could not allocate second matrix!\n");
             return status;
         }
+
+        own_matrix = malloc(APP_BUFFER_SIZE);
 
         // Setup first matrix
         MSGQ_setMsgId(in_matrix1, 0x1);
@@ -306,6 +310,17 @@ extern "C"
 #if defined (PROFILE)
         SYSTEM_GetStartTime();
 #endif
+        /* Do own parallel calculation */
+        for (i = matrixSize * (100-percentage) / 100;i < matrixSize; i++)
+        {
+            for (j = 0; j < matrixSize; j++)
+            {
+                own_matrix->matrix[i][j] = 0;
+                for(k=0; k < matrixSize; k++)
+                    own_matrix->matrix[i][j] = own_matrix->matrix[i][j] + in_matrix1->matrix[i][k] * in_matrix2->matrix[k][j];
+            }
+        }
+
         /* Receive the answer */
         status = MSGQ_get(SampleGppMsgq, WAIT_FOREVER, (MsgqMsg *) &out_matrix);
         if (DSP_FAILED(status))
@@ -318,6 +333,13 @@ extern "C"
         SYSTEM_GetEndTime();
 #endif
 
+        /* Combine the result */
+        for (i = matrixSize * (100-percentage) / 100;i < matrixSize; i++)
+        {
+            for (j = 0; j < matrixSize; j++)
+                out_matrix->matrix[i][j] = own_matrix->matrix[i][j];
+        }
+
         /* Print the answer */
         SYSTEM_1Print("Answer(%d): \n", MSGQ_getMsgId((MSGQ_Msg) out_matrix));
         for (i = 0;i < matrixSize; i++)
@@ -328,7 +350,7 @@ extern "C"
         }
 
 #if defined (PROFILE)
-        SYSTEM_GetProfileInfo(matrixSize);
+        SYSTEM_GetProfileInfo(matrixSize, percentage);
 #endif
 
 #if defined (VERIFY_DATA)
@@ -446,17 +468,19 @@ extern "C"
      *  @modif  None
      *  ============================================================================
      */
-    NORMAL_API Void matrixMult_Main(IN Char8* dspExecutable, IN Char8* strMatrixSize, IN Char8* strProcessorId)
+    NORMAL_API Void matrixMult_Main(IN Char8* dspExecutable, IN Char8* strMatrixSize, IN Char8* strPercentage, IN Char8* strProcessorId)
     {
         DSP_STATUS status = DSP_SOK;
         Uint32 matrixSize = 0;
+        Uint8 percentage = 100;
         Uint8 processorId = 0;
 
         SYSTEM_0Print ("========== matrixMult: Matrix multiplication ==========\n");
 
-        if ((dspExecutable != NULL) && (strMatrixSize != NULL))
+        if ((dspExecutable != NULL) && (strMatrixSize != NULL) && (strPercentage != NULL))
         {
             matrixSize = SYSTEM_Atoi(strMatrixSize);
+            percentage = SYSTEM_Atoi(strPercentage);
 
             if (matrixSize > 100 || matrixSize < 1)
             {
@@ -475,12 +499,12 @@ extern "C"
                 /* Specify the dsp executable file name for message creation phase. */
                 if (DSP_SUCCEEDED(status))
                 {
-                    status = matrixMult_Create(dspExecutable, strMatrixSize, processorId);
+                    status = matrixMult_Create(dspExecutable, strMatrixSize, strPercentage, processorId);
 
                     /* Execute the message execute phase. */
                     if (DSP_SUCCEEDED(status))
                     {
-                        status = matrixMult_Execute(matrixSize, processorId);
+                        status = matrixMult_Execute(matrixSize, percentage, processorId);
                     }
 
                     /* Perform cleanup operation. */
@@ -507,18 +531,19 @@ extern "C"
      */
     STATIC NORMAL_API DSP_STATUS matrixMult_VerifyData(ControlMsg *matrix1, ControlMsg *matrix2, ControlMsg *out, IN Uint32 matrixSize)
     {
-        int i, j, k;
+        int i, j, k, mult;
         DSP_STATUS status = DSP_SOK;
 
         for (i = 0;i < matrixSize; i++)
         {
             for (j = 0; j < matrixSize; j++)
             {
+                mult = 0;
                 for(k=0; k < matrixSize; k++)
-                {
-                    if(out->matrix[i][j] != (matrix1->matrix[i][k] * matrix2->matrix[k][j]))
-                        status = DSP_EFAIL;
-                }
+                    mult = mult + matrix1->matrix[i][k] * matrix2->matrix[k][j];
+
+                if(mult != out->matrix[i][j])
+                    status = DSP_EFAIL;
             }
         }
         return status;

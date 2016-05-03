@@ -25,6 +25,9 @@ extern "C" {
 /* The size of the matrix */
 Uint16 matrix_size;
 
+/* Percentage to run */
+Uint16 percentage;
+
 /** ----------------------------------------------------------------------------
  *  @func   tskMessage
  *
@@ -57,6 +60,8 @@ Void main(Int argc, Char* argv [])
 #if !defined (DSP_BOOTMODE_NOBOOT)
     /* Get the size of the matrix to be calculated by the application */
     matrix_size = atoi(argv [0]);
+    /* Get the percentage to calculate of this matrix */
+    percentage = atoi(argv [1]);
     /* Initialize DSP/BIOS LINK. */
     DSPLINK_init();
 #endif

@@ -29,16 +29,19 @@ extern "C"
     int main (int argc, char** argv)
     {
         Char8* dspExecutable = NULL;
-        Char8* strNumIterations = NULL;
+        Char8* strMatrixSize = NULL;
+        Char8* strPercentage = NULL;
         Char8* strProcessorId = NULL;
         Uint8 processorId = 0;
 
         /*	long long _Fract value = atof("2.3");
         	printf("%k\n",value);	*/
 
-        if ((argc != 4) && (argc!=3))
+        if ((argc != 6) && (argc!=5) && (argc!=4) && (argc!=3))
         {
-            SYSTEM_1Print("Usage : %s <absolute path of DSP executable> <size of the matrix> <DSP Processor Id>\n"
+            SYSTEM_1Print("Usage : %s <absolute path of DSP executable> <size of the matrix> <percentage on DSP> <quiet> <DSP Processor Id>\n"
+                          "Default percetage is 100\%\n"
+                          "Quiet is 1 or 0\n"
                           "For DSP Processor Id,"
                           "\n\t use value of 0  if sample needs to be run on DSP 0 "
                           "\n\t use value of 1  if sample needs to be run on DSP 1"
@@ -49,22 +52,44 @@ extern "C"
         else
         {
             dspExecutable = argv[1];
-            strNumIterations = argv[2];
+            strMatrixSize = argv[2];
 
-            if (argc == 3)
+            /* Fix the precentage */
+            if (argc == 3) 
+            {
+              strPercentage = "100";
+            }
+            else
+            {
+              strPercentage = argv[3];
+            }
+
+            /* Parse quiet */
+            if (argc == 3 || argc == 4)
+            {
+              quietPrint = 0;
+            }
+            else
+            {
+              quietPrint = atoi(argv[4]);
+            }
+
+            /* Parse the processor ID */
+            if (argc == 3 || argc == 4 || argc == 5)
             {
                 strProcessorId = "0";
                 processorId = 0;
             }
             else
             {
-                strProcessorId = argv[3];
-                processorId = atoi(argv[3]);
+                strProcessorId = argv[5];
+                processorId = atoi(argv[5]);
             }
 
+            /* If processor id and percentage is valid execute */
             if (processorId < MAX_PROCESSORS)
             {
-                matrixMult_Main(dspExecutable, strNumIterations, strProcessorId);
+                matrixMult_Main(dspExecutable, strMatrixSize, strPercentage, strProcessorId);
             }
         }
 
