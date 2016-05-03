@@ -8,7 +8,7 @@ endif
 CFLAGS= -O3 -Wall -DPROFILE -mfloat-abi=softfp -mfpu=neon
 LIBS= -lm
 LDFLAGS=
-EXEC = matMult
+EXEC = matMultNeon
 CSRCS = matrixmult.c Timer.c
 OBJS = $(CSRCS:.c=.o)
 
@@ -35,7 +35,7 @@ clean:
 ############# REMOTE STUFF ################
 # Fetch the files from remote
 fetch:
-	scp $(REMOTE_ESL):$(ESL_DIR)/{$(FETCH_FILES)} ./
+	scp $(REMOTE_ESL):$(ESL_DIR)/$(EXEC) ./
 
 # Build it remote
 remote:

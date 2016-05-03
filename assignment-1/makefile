@@ -12,10 +12,14 @@ gpp:
 orig:
 	cd orig; make remote && make fetch; cd ..
 
+neon:
+	cd neon; make remote && make fetch; cd ..
+
 send:
 	cd dsp; R=$(R) make send; cd ..
 	cd gpp; R=$(R) make send; cd ..
 	cd orig; R=$(R) make send; cd ..
+	cd neon; R=$(R) make send; cd ..
 
 access:
 	ssh -R2230:$(REMOTE_BB):22 $(REMOTE_ESL)
@@ -23,4 +27,4 @@ access:
 conn:
 	ssh -L2230:localhost:2230 $(REMOTE_ESL)
 
-.PHONY: all gpp dsp orig send access conn
+.PHONY: all gpp dsp orig neon send access conn
