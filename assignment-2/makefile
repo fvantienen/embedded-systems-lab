@@ -41,11 +41,11 @@ $(EXEC) : $(OBJS)
 %.o : %.c
 	$(CC) $(CFLAGS) $(INCS) -c $< -o $@ 
 
-run: $(EXEC) $(PIC)
+run: $(EXEC) ./pics/$(PIC)
 	$(CMD)
 
 debug: CFLAGS= -g -Wall
-debug: clean $(EXEC) $(PIC)
+debug: clean $(EXEC) ./pics/$(PIC)
 	gdb --args $(CMD)
 
 gprof: CFLAGS=-O2 -g -pg -Wall
