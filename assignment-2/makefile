@@ -6,9 +6,10 @@ CC?=gcc
 # Use the following (instead of gcc) for arm compiler
 ifeq ($(CROSS_COMPILE), 1)
 	CC =/opt/bbToolChain/usr/local/share/codesourcery/bin/arm-none-linux-gnueabi-gcc
+	CFLAGS += -DCROSS_COMPILE
 endif
 INC = -I.
-CFLAGS =-O2 -Wall
+CFLAGS +=-O2 -Wall
 LFLAGS = -L.
 LIBS = -lm
 LDFLAGS=
@@ -25,7 +26,7 @@ EXEC    = canny
 CMD	= ./$(EXEC) ./pics/$(PIC)
 
 # Fetched files
-FETCH_FILES = $(EXEC),callgraph.pdf,communication.pdf
+FETCH_FILES = $(EXEC),callgraph.pdf,communication.pdf,gprof.out,matrix.eps
 
 # Remote directories
 BEAGLE_DIR=/home/root/esLAB/assignment-2
@@ -33,7 +34,7 @@ ESL_DIR=/data/home/in4342-03/embedded-systems-lab/assignment-2
 REMOTE_BB?=root@192.168.0.202
 REMOTE_ESL=in4342-03@ce-eslab.ewi.tudelft.nl
 
-all: clean $(EXEC) run
+all: clean $(EXEC)
 
 $(EXEC) : $(OBJS)
 	$(CC) $(OBJS) -o $(EXEC) $(LFLAGS) $(LDFLAGS) $(LIBS)
@@ -63,7 +64,7 @@ mcprof: clean $(EXEC)
 	$(MCPROF_DIR)/scripts/plotScript.sh
 
 clean:
-	rm -f $(EXEC) $(OBJS) *~ gmon.out pin.log *.out *.dot *.json *.eps
+	rm -f $(EXEC) $(OBJS) *~ gmon.out pin.log *.dot *.json
 
 ############# REMOTE STUFF ################
 # Fetch the files from remote

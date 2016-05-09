@@ -2,6 +2,12 @@
 #define MARKERS_H
 
 
+/* For corss compiling ignore */
+#if CROSS_COMPILE
+#define __PIN_MAGIC(n) {}
+#define __PIN_MAGIC3(n, a1, a2) {}
+#else
+
 #define __PIN_MAGIC(n) do {                                         \
         __asm__ __volatile__ ("movl %0, %%eax;                      \
                                xchg %%bx,%%bx"                      \
@@ -21,6 +27,7 @@
                                : "%eax", "%ecx", "%edx"        /* clobbered register */   \
                               );                                    \
 } while (0)
+#endif
 
 #define __PIN_CMD_MASK              0xff000000
 #define __PIN_CMD_OFFSET            24
