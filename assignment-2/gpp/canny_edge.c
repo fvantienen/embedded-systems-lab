@@ -33,22 +33,34 @@ extern "C" {
 #endif
 #define VPRINT if(VERBOSE) printf
 
+/* Enable verify by default (makes it slower) */
+#ifndef VERIFY
+#define VERIFY 1
+#endif
+
 /* Pool and message defines */
 #define SAMPLE_POOL_ID                   0 ///< Pool number used for data transfers
-#define NUM_BUF_SIZES                    1 ///< Amount of pools to be configured
+#define NUM_BUF_SIZES                    2 ///< Amount of pools to be configured
 #define NUM_BUF_POOL0                    1 ///< Amount of buffers in the first pool
+#define NUM_BUF_POOL1                    1 ///< Amount of buffers in the second pool
 #define NUM_BUF_MAX                      1 ///< Maximum amount of buffers in pool
 #define canny_edge_IPS_ID                0 ///< IPS ID used for sending notifications to the DPS
 #define canny_edge_IPS_EVENTNO           5 ///< Event number used for notifications to the DSP
 
+enum {
+    canny_edge_INIT,                    ///< Initialization stage
+    canny_edge_DELETE,                  ///< Shutdown step
+    canny_edge_WRITEBACK                ///< Simple write back program
+};
+
 /* General variables */
-sem_t sem;                                          ///< Semaphore used for synchronising events
-unsigned char *canny_edge_image;                    ///< The canny edge input image
-int canny_edge_rows, canny_edge_cols;               ///< The canny edge input width and height
-Uint16 pool_sizes[] = {NUM_BUF_POOL0, };            ///< The pool sizes
-Uint32 buffer_sizes[NUM_BUF_SIZES];                 ///< The buffer sizes
-Void *buffers[NUM_BUF_SIZES][NUM_BUF_MAX];          ///< The buffers
-Void *dsp_buffers[NUM_BUF_SIZES][NUM_BUF_MAX];      ///< Buffer addresses on the DSP
+sem_t sem;                                              ///< Semaphore used for synchronising events
+unsigned char *canny_edge_image;                        ///< The canny edge input image
+int canny_edge_rows, canny_edge_cols;                   ///< The canny edge input width and height
+Uint32 pool_sizes[] = {NUM_BUF_POOL0, NUM_BUF_POOL1};   ///< The pool sizes
+Uint32 buffer_sizes[NUM_BUF_SIZES];                     ///< The buffer sizes
+Void *buffers[NUM_BUF_SIZES][NUM_BUF_MAX];              ///< The buffers
+Void *dsp_buffers[NUM_BUF_SIZES][NUM_BUF_MAX];          ///< Buffer addresses on the DSP
 
 
 /* Specific canny edge variables */
@@ -59,7 +71,7 @@ Void *dsp_buffers[NUM_BUF_SIZES][NUM_BUF_MAX];      ///< Buffer addresses on the
 
 /* Used functions */
 STATIC Void canny_edge_Notify(Uint32 eventNo, Pvoid arg, Pvoid info);
-STATIC short int* gaussian_smooth(unsigned char *image, int rows, int cols, float sigma);
+STATIC void gaussian_smooth(unsigned char *image, short int* smoothedim, int rows, int cols, float sigma);
 STATIC void make_gaussian_kernel(float sigma, float **kernel, int *windowsize);
 STATIC void derrivative_x_y(short int *smoothedim, int rows, int cols,
         short int **delta_x, short int **delta_y);
@@ -124,8 +136,9 @@ NORMAL_API DSP_STATUS canny_edge_Create (	IN Char8 * dspExecutable,
         return DSP_EFAIL;
     }
 
-    /* Set the buffer sizes */
+    /* Set the buffer sizes based on image size */
     buffer_sizes[0] = DSPLINK_ALIGN(sizeof(unsigned char) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN);
+    buffer_sizes[1] = DSPLINK_ALIGN(sizeof(short int) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN);
 
     /*
      *  Open the pool.
@@ -139,6 +152,9 @@ NORMAL_API DSP_STATUS canny_edge_Create (	IN Char8 * dspExecutable,
 	{
         fprintf(stderr, "POOL_open () failed. Status = [0x%x]\n", (int)status);
         return status;
+    }
+    else {
+        VPRINT("POOL_open () successfull!\n");
     }
 
     /*
@@ -261,6 +277,43 @@ long long get_usec(void)
   return r;
 }
 
+/* Simple function which transmits the image and expects it back with each pixel +1 */
+STATIC void canny_edge_Writeback (Uint8 processorId)
+{
+    int i, status;
+    unsigned char *buf = (unsigned char *)buffers[0][0];
+
+    /* Send the image */
+    POOL_writeback (POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                    buffers[0][0],
+                    buffer_sizes[0]);
+    NOTIFY_notify (processorId, canny_edge_IPS_ID, canny_edge_IPS_EVENTNO, canny_edge_WRITEBACK);
+    VPRINT("  Writeback send, waiting for response...\r\n");
+
+    /* Wait for the response */
+    sem_wait(&sem);
+
+    /* Invalidate the result */
+    POOL_invalidate(POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                    buffers[0][0],
+                    buffer_sizes[0]);
+
+    /* Check if the result is correct */
+    if(VERIFY) {
+        status = DSP_SOK;
+        for(i = 0; i < buffer_sizes[0]; i++) {
+            canny_edge_image[i]++;
+            if(buf[i] != canny_edge_image[i]) {
+                fprintf(stderr, "Got incorrect image back! Expected %d, Got %d (i: %d)\r\n", canny_edge_image[i], buf[i], i);
+                status = DSP_EFAIL;
+            }
+        }
+
+        if(DSP_SUCCEEDED(status))
+            VPRINT("Writeback was succesfull!\r\n");
+    }
+}
+
 /** ============================================================================
  *  @func   canny_edge_Execute
  *
@@ -269,47 +322,62 @@ long long get_usec(void)
  *  @modif  None
  *  ============================================================================
  */
-NORMAL_API DSP_STATUS canny_edge_Execute (Uint8 processorId)
+NORMAL_API DSP_STATUS canny_edge_Execute (Uint8 processorId, IN Char8 * strImage)
 {
     DSP_STATUS  status = DSP_SOK;
-    int i;
-    unsigned char *buf = (unsigned char *)buffers[0][0];
     long long start_time;
+    unsigned char *image = (unsigned char *)buffers[0][0];
+    short int *smoothedim = (short int *)buffers[1][0];
+    short int *delta_x = (short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
+    short int *delta_y = (short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
+    short int *magnitude = (short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
+    unsigned char *nms = (unsigned char *)malloc(sizeof(unsigned char) * canny_edge_rows * canny_edge_cols);
+    unsigned char *edge = (unsigned char *)malloc(sizeof(unsigned char) * canny_edge_rows * canny_edge_cols);
+    char outfilename[128];    /* Name of the output "edge" image */
 
     VPRINT("Entered canny_edge_Execute ()\n");
 
     /* Copy the open image (since this is generated by PGM IO) */
-    memcpy(buffers[0][0], canny_edge_image, buffer_sizes[0]);
+    memcpy(image, canny_edge_image, buffer_sizes[0]);
 
     /* Start the timer */
     start_time = get_usec();
 
-    // Try to send the image
-    POOL_writeback (POOL_makePoolId(processorId, SAMPLE_POOL_ID),
-                    buffers[0][0],
-                    buffer_sizes[0]);
-    NOTIFY_notify (processorId, canny_edge_IPS_ID, canny_edge_IPS_EVENTNO, 1);
+    /* Do a writeback test */
+    VPRINT(" Starting writeback\r\n");
+    canny_edge_Writeback(processorId);
 
-    // Wait for response
-    sem_wait(&sem);
+    /* Do the guassian smoothing */
+    VPRINT(" Starting guassian smoothing\r\n");
+    gaussian_smooth(image, smoothedim, canny_edge_rows, canny_edge_cols, SIGMA);
 
-    // Invalidate the result
-    POOL_invalidate(POOL_makePoolId(processorId, SAMPLE_POOL_ID),
-                    buffers[0][0],
-                    buffer_sizes[0]);
+    /* Calculate the derrivatives */
+    VPRINT(" Starting derrivative x, y\r\n");
+    derrivative_x_y(smoothedim, canny_edge_rows, canny_edge_cols, &delta_x, &delta_y);
+
+    /* Compute the magnitude */
+    VPRINT(" Starting magnitude x, y\r\n");
+    magnitude_x_y(delta_x, delta_y, canny_edge_rows, canny_edge_cols, magnitude);
+
+    /* Do the Non maximal suppression */
+    VPRINT(" Starting non maximal suppression \r\n");
+    non_max_supp(magnitude, delta_x, delta_y, canny_edge_rows, canny_edge_cols, nms);
+
+    /* Apply the hysteresis */
+    VPRINT(" Starting hysteresis \r\n");
+    apply_hysteresis(magnitude, nms, canny_edge_rows, canny_edge_cols, TLOW, THIGH, edge);
 
     /* Stop the timer and return */
     printf("Canny edge took %lld us.\n", (get_usec() - start_time));
 
-    // Check the result
-    for(i = 0; i < buffer_sizes[0]; i++) {
-        canny_edge_image[i]++;
-        if(buf[i] != canny_edge_image[i])
-            fprintf(stderr, "Got incorrect image back! Expected %d, Got %d (i: %d)\r\n", canny_edge_image[i], buf[i], i);
+    /* Save the image */
+    sprintf(outfilename, "%s_out.pgm", strImage);
+    if(write_pgm_image(outfilename, edge, canny_edge_rows, canny_edge_cols, "", 255) == 0)
+    {
+        fprintf(stderr, "Error writing the edge image, %s.\n", outfilename);
+        status = DSP_EFAIL;
     }
 
-    // Free the canny edge image
-    free(canny_edge_image);
     return status;
 }
 
@@ -332,6 +400,20 @@ NORMAL_API Void canny_edge_Delete (Uint8 processorId)
     Uint16 i, j;
 
 	VPRINT("Entered canny_edge_Delete ()\n") ;
+
+    /* Send DSP to stop */
+    status = NOTIFY_notify (processorId,
+                            canny_edge_IPS_ID,
+                            canny_edge_IPS_EVENTNO,
+                            (Uint32) canny_edge_DELETE);
+    if (DSP_FAILED (status)) 
+    {
+        fprintf(stderr, "NOTIFY_notify () DataBuf failed. Status = [0x%x]\n", (int)status);
+    }
+
+
+    /* Free the canny edge image */
+    free(canny_edge_image);
 
     /*
      *  Stop execution on DSP.
@@ -419,7 +501,7 @@ NORMAL_API Void canny_edge_Main (IN Char8 * dspExecutable, IN Char8 * strImage)
 
         if (DSP_SUCCEEDED(status)) 
 		{
-            status = canny_edge_Execute(ID_PROCESSOR);
+            status = canny_edge_Execute(ID_PROCESSOR, strImage);
         }
 
          canny_edge_Delete(ID_PROCESSOR);
@@ -446,10 +528,10 @@ STATIC Void canny_edge_Notify (Uint32 eventNo, Pvoid arg, Pvoid info)
 {
     VPRINT("Notification event: %lu, info: %8d \r\n", eventNo, (int)info);
     /* Post the semaphore for initialization. */
-    if((int)info == 0) 
+    if((int)info == canny_edge_INIT) 
 	{
         sem_post(&sem);
-    } else if((int)info == 10) {
+    } else if((int)info == canny_edge_WRITEBACK) {
         sem_post(&sem);
     }
 }
@@ -570,19 +652,7 @@ STATIC void derrivative_x_y(short int *smoothedim, int rows, int cols,
         short int **delta_x, short int **delta_y)
 {
    int r, c, pos;
-   /****************************************************************************
-   * Allocate images to store the derivatives.
-   ****************************************************************************/
-   if(((*delta_x) = (short *) malloc(rows*cols* sizeof(short))) == NULL){
-      fprintf(stderr, "Error allocating the delta_x image.\n");
-      exit(1);
-   }
-   if(((*delta_y) = (short *) malloc(rows*cols* sizeof(short))) == NULL){
-      fprintf(stderr, "Error allocating the delta_x image.\n");
-      exit(1);
-   }
-
-
+   // Calculate the X direction
    for(r=0;r<rows;r++){
       pos = r * cols;
       (*delta_x)[pos] = smoothedim[pos+1] - smoothedim[pos];
@@ -593,6 +663,7 @@ STATIC void derrivative_x_y(short int *smoothedim, int rows, int cols,
       (*delta_x)[pos] = smoothedim[pos] - smoothedim[pos-1];
    }
 
+   // Calculate the Y direction
    for(c=0;c<cols;c++){
       pos = c;
       (*delta_y)[pos] = smoothedim[pos+cols] - smoothedim[pos];
@@ -610,7 +681,7 @@ STATIC void derrivative_x_y(short int *smoothedim, int rows, int cols,
 * NAME: Mike Heath
 * DATE: 2/15/96
 *******************************************************************************/
-STATIC short int* gaussian_smooth(unsigned char *image, int rows, int cols, float sigma)
+STATIC void gaussian_smooth(unsigned char *image, short int* smoothedim, int rows, int cols, float sigma)
 {
     int r, c, rr, cc,     /* Counter variables. */
         windowsize,        /* Dimension of the gaussian kernel. */
@@ -619,7 +690,6 @@ STATIC short int* gaussian_smooth(unsigned char *image, int rows, int cols, floa
           *kernel,        /* A one dimensional gaussian kernel. */
           dot,            /* Dot product summing variable. */
           sum;            /* Sum of the kernel weights variable. */
-    short int* smoothedim;
 
     /****************************************************************************
     * Create a 1-dimensional gaussian smoothing kernel.
@@ -630,17 +700,11 @@ STATIC short int* gaussian_smooth(unsigned char *image, int rows, int cols, floa
 
 
     /****************************************************************************
-    * Allocate a temporary buffer image and the smoothed image.
+    * Allocate a temporary buffer image
     ****************************************************************************/
     if((tempim = (float *) malloc(rows*cols* sizeof(float))) == NULL)
     {
         fprintf(stderr, "Error allocating the buffer image.\n");
-        exit(1);
-    }
-    
-    if(((smoothedim) = (short int *) malloc(rows*cols*sizeof(short int))) == NULL)
-    {
-        fprintf(stderr, "Error allocating the smoothed image.\n");
         exit(1);
     }
 
@@ -690,7 +754,6 @@ STATIC short int* gaussian_smooth(unsigned char *image, int rows, int cols, floa
 
     free(tempim);
     free(kernel);
-    return smoothedim;
 }
 
 /*******************************************************************************

@@ -68,7 +68,7 @@ canny_edge_Create (IN Char8 * dspExecutable,
  */
 NORMAL_API
 DSP_STATUS
-canny_edge_Execute (IN Uint8 processorId) ;
+canny_edge_Execute (IN Uint8 processorId, IN Char8 * strImage) ;
 
 
 /** ============================================================================

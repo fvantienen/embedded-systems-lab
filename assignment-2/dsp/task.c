@@ -18,11 +18,18 @@
 #include <task.h>
 
 /* Buffer defines */
-#define NUM_BUF_SIZES                    1 ///< Amount of pools to be configured
+#define NUM_BUF_SIZES                    2 ///< Amount of pools to be configured
 #define NUM_BUF_POOL0                    1 ///< Amount of buffers in the first pool
+#define NUM_BUF_POOL1                    1 ///< Amount of buffers in the second pool
 #define NUM_BUF_MAX                      1 ///< Maximum amount of buffers in pool
 
-Uint16 pool_sizes[] = {NUM_BUF_POOL0, };
+enum {
+    canny_edge_INIT,                    ///< Initialization stage
+    canny_edge_DELETE,                  ///< Shutdown step
+    canny_edge_WRITEBACK                ///< Simple write back program
+};
+
+Uint32 pool_sizes[] = {NUM_BUF_POOL0, NUM_BUF_POOL1};
 Void *dsp_buffers[NUM_BUF_SIZES][NUM_BUF_MAX];      ///< Buffer addresses on the DSP
 Uint32 buffer_sizes[NUM_BUF_SIZES];                 ///< The buffer sizes
 
@@ -83,7 +90,7 @@ Int Task_create (Task_TransferInfo ** infoPtr)
         status = NOTIFY_notify (ID_GPP,
                                 MPCSXFER_IPS_ID,
                                 MPCSXFER_IPS_EVENTNO,
-                                (Uint32) 0) ; /* No payload to be sent. */
+                                (Uint32) canny_edge_INIT);
         if (status != SYS_OK) 
 		    {
             return status;
@@ -99,28 +106,32 @@ Int Task_create (Task_TransferInfo ** infoPtr)
     return status ;
 }
 
-Int Task_execute (Task_TransferInfo * info)
+Void Task_writeback(Void)
 {
-  int i;
+  Uint32 i;
   unsigned char *buf = (unsigned char *)dsp_buffers[0][0];
 
-  //wait for semaphore
-	  SEM_pend (&(info->notifySemObj), SYS_FOREVER);
+  /* Invalidate cache */
+  BCACHE_inv (dsp_buffers[0][0], buffer_sizes[0], TRUE);
 
-	//invalidate cache
-    BCACHE_inv (dsp_buffers[0][0], buffer_sizes[0], TRUE);
+  /* Add 1 to each pixel */
+  for(i = 0; i < buffer_sizes[0]; i++) {
+    buf[i]++;
+  }
 
-    for(i = 0; i < buffer_sizes[0]; i++) {
-      buf[i]++;
-    }
+  /* Write back and invalidate */
+  BCACHE_wbInv(dsp_buffers[0][0], buffer_sizes[0], TRUE);
 
-  // Write back and invalidate
-    BCACHE_wbInv(dsp_buffers[0][0], buffer_sizes[0], TRUE);
+  /* Notify the result */
+  NOTIFY_notify(ID_GPP, MPCSXFER_IPS_ID, MPCSXFER_IPS_EVENTNO, canny_edge_WRITEBACK);
+}
 
-	//notify the result
-    NOTIFY_notify(ID_GPP, MPCSXFER_IPS_ID, MPCSXFER_IPS_EVENTNO, (Uint32)10);
+Int Task_execute (Task_TransferInfo * info)
+{
+  /* Wait for all tasks to be completed */
+  SEM_pend (&(info->notifySemObj), SYS_FOREVER);
 
-    return SYS_OK;
+  return SYS_OK;
 }
 
 Int Task_delete (Task_TransferInfo * info)
@@ -156,7 +167,7 @@ static Void Task_notify (Uint32 eventNo, Ptr arg, Ptr info)
 
     // Check if we received all the pool information
     if(pool_cnt < NUM_BUF_SIZES) {
-
+      
       // We received an address
       if(got_address == 0) {
         dsp_buffers[pool_cnt][buffer_cnt] = info;
@@ -179,7 +190,18 @@ static Void Task_notify (Uint32 eventNo, Ptr arg, Ptr info)
     }
 
     // Check we if received the last buffer
-    if(pool_cnt >= NUM_BUF_SIZES) {
+    if(pool_cnt == NUM_BUF_SIZES) {
       SEM_post(&(mpcsInfo->notifySemObj));
-    }    
+      pool_cnt++;
+    } 
+    else if(pool_cnt > NUM_BUF_SIZES) { 
+
+      // Execute a task
+      if((Uint32)info == canny_edge_DELETE) {
+        SEM_post(&(mpcsInfo->notifySemObj));
+      }
+      else if((Uint32)info == canny_edge_WRITEBACK) {
+        Task_writeback();
+      }
+    }   
 }
