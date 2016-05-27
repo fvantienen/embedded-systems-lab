@@ -40,9 +40,14 @@ extern "C" {
 
 /* Pool and message defines */
 #define SAMPLE_POOL_ID                   0 ///< Pool number used for data transfers
-#define NUM_BUF_SIZES                    2 ///< Amount of pools to be configured
+#define NUM_BUF_SIZES                    7 ///< Amount of pools to be configured
 #define NUM_BUF_POOL0                    1 ///< Amount of buffers in the first pool
 #define NUM_BUF_POOL1                    1 ///< Amount of buffers in the second pool
+#define NUM_BUF_POOL2                    1 ///< Amount of buffers in the second pool
+#define NUM_BUF_POOL3                    1 ///< Amount of buffers in the second pool
+#define NUM_BUF_POOL4                    1 ///< Amount of buffers in the second pool
+#define NUM_BUF_POOL5                    1 ///< Amount of buffers in the second pool
+#define NUM_BUF_POOL6                    1 ///< Amount of buffers in the second pool
 #define NUM_BUF_MAX                      1 ///< Maximum amount of buffers in pool
 #define canny_edge_IPS_ID                0 ///< IPS ID used for sending notifications to the DPS
 #define canny_edge_IPS_EVENTNO           5 ///< Event number used for notifications to the DSP
@@ -57,7 +62,7 @@ enum {
 sem_t sem;                                              ///< Semaphore used for synchronising events
 unsigned char *canny_edge_image;                        ///< The canny edge input image
 int canny_edge_rows, canny_edge_cols;                   ///< The canny edge input width and height
-Uint32 pool_sizes[] = {NUM_BUF_POOL0, NUM_BUF_POOL1};   ///< The pool sizes
+Uint32 pool_sizes[] = {NUM_BUF_POOL0, NUM_BUF_POOL1, NUM_BUF_POOL2, NUM_BUF_POOL3, NUM_BUF_POOL4, NUM_BUF_POOL5};   ///< The pool sizes
 Uint32 buffer_sizes[NUM_BUF_SIZES];                     ///< The buffer sizes
 Void *buffers[NUM_BUF_SIZES][NUM_BUF_MAX];              ///< The buffers
 Void *dsp_buffers[NUM_BUF_SIZES][NUM_BUF_MAX];          ///< Buffer addresses on the DSP
@@ -136,9 +141,14 @@ NORMAL_API DSP_STATUS canny_edge_Create (	IN Char8 * dspExecutable,
         return DSP_EFAIL;
     }
 
+    VPRINT("Start allocating buffer \n");
     /* Set the buffer sizes based on image size */
     buffer_sizes[0] = DSPLINK_ALIGN(sizeof(unsigned char) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN);
     buffer_sizes[1] = DSPLINK_ALIGN(sizeof(short int) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN);
+    buffer_sizes[2] = DSPLINK_ALIGN(sizeof(short int) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN);
+    buffer_sizes[3] = DSPLINK_ALIGN(sizeof(int), DSPLINK_BUF_ALIGN);
+    buffer_sizes[4] = DSPLINK_ALIGN(sizeof(int), DSPLINK_BUF_ALIGN);
+    buffer_sizes[5] = DSPLINK_ALIGN(sizeof(short int) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN);
 
     /*
      *  Open the pool.
@@ -314,6 +324,57 @@ STATIC void canny_edge_Writeback (Uint8 processorId)
     }
 }
 
+/* DSP communication for magnitude calculation function */
+STATIC void DSP_magnitude_x_y(Uint8 processorId)
+{
+     int i, status;
+     unsigned char *magnitude = (unsigned char *)buffers[6][0];
+
+    /* Send the input data */
+    // Send deriv_x
+    POOL_writeback (POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                    buffers[2][0],
+                    buffer_sizes[2]);
+    // Send deriv_y
+    POOL_writeback (POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                    buffers[3][0],
+                    buffer_sizes[3]);
+    // Send row
+    POOL_writeback (POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                    buffers[4][0],
+                    buffer_sizes[4]);
+    // Send col
+    POOL_writeback (POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                    buffers[5][0],
+                    buffer_sizes[5]);
+
+
+    NOTIFY_notify (processorId, canny_edge_IPS_ID, canny_edge_IPS_EVENTNO, DSP_magnitude_x_y);
+    VPRINT("  DSP_magnitude_x_y send, waiting for response...\r\n");
+
+    /* Wait for the response */
+    sem_wait(&sem);
+
+    /* Invalidate the result */
+    POOL_invalidate(POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                    buffers[6][0],
+                    buffer_sizes[6]);
+
+    // /* Check if the result is correct */
+    // if(VERIFY) {
+    //     status = DSP_SOK;
+    //     for(i = 0; i < buffer_sizes[6]; i++) {
+    //         if(buf[i] != canny_edge_image[i]) {
+    //             fprintf(stderr, "Got incorrect image back! Expected %d, Got %d (i: %d)\r\n", canny_edge_image[i], buf[i], i);
+    //             status = DSP_EFAIL;
+    //         }
+    //     }
+
+    //     if(DSP_SUCCEEDED(status))
+    //         VPRINT("Execution of DSP_magnitude_x_y was succesfull!\r\n");
+    // }
+}
+
 /** ============================================================================
  *  @func   canny_edge_Execute
  *
@@ -328,9 +389,11 @@ NORMAL_API DSP_STATUS canny_edge_Execute (Uint8 processorId, IN Char8 * strImage
     long long start_time;
     unsigned char *image = (unsigned char *)buffers[0][0];
     short int *smoothedim = (short int *)buffers[1][0];
-    short int *delta_x = (short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
-    short int *delta_y = (short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
-    short int *magnitude = (short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
+    short int *delta_x = (short int *)buffers[2][0]; //(short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
+    short int *delta_y = (short int *)buffers[3][0]; //(short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
+    int row = (int) buffers[4][0];
+    int col = (int) buffers[5][0];
+    short int *magnitude = (short int *)buffers[6][0]; //malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
     unsigned char *nms = (unsigned char *)malloc(sizeof(unsigned char) * canny_edge_rows * canny_edge_cols);
     unsigned char *edge = (unsigned char *)malloc(sizeof(unsigned char) * canny_edge_rows * canny_edge_cols);
     char outfilename[128];    /* Name of the output "edge" image */
@@ -354,6 +417,10 @@ NORMAL_API DSP_STATUS canny_edge_Execute (Uint8 processorId, IN Char8 * strImage
     /* Calculate the derrivatives */
     VPRINT(" Starting derrivative x, y\r\n");
     derrivative_x_y(smoothedim, canny_edge_rows, canny_edge_cols, &delta_x, &delta_y);
+
+    /* Compute the magnitude on DSP */
+    VPRINT(" Starting magnitude x,y on DSP\r\n");
+    DSP_magnitude_x_y(processorId);
 
     /* Compute the magnitude */
     VPRINT(" Starting magnitude x, y\r\n");

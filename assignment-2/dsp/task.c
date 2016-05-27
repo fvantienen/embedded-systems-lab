@@ -18,15 +18,21 @@
 #include <task.h>
 
 /* Buffer defines */
-#define NUM_BUF_SIZES                    2 ///< Amount of pools to be configured
+#define NUM_BUF_SIZES                    7 ///< Amount of pools to be configured
 #define NUM_BUF_POOL0                    1 ///< Amount of buffers in the first pool
 #define NUM_BUF_POOL1                    1 ///< Amount of buffers in the second pool
+#define NUM_BUF_POOL2                    1 ///< Amount of buffers in the second pool
+#define NUM_BUF_POOL3                    1 ///< Amount of buffers in the second pool
+#define NUM_BUF_POOL4                    1 ///< Amount of buffers in the second pool
+#define NUM_BUF_POOL5                    1 ///< Amount of buffers in the second pool
+#define NUM_BUF_POOL6                    1 ///< Amount of buffers in the second pool
 #define NUM_BUF_MAX                      1 ///< Maximum amount of buffers in pool
 
 enum {
     canny_edge_INIT,                    ///< Initialization stage
     canny_edge_DELETE,                  ///< Shutdown step
-    canny_edge_WRITEBACK                ///< Simple write back program
+    canny_edge_WRITEBACK,               ///< Simple write back program
+    DSP_magnitude_x_y                   ///< Magnitude calculation x,y on DSP program
 };
 
 Uint32 pool_sizes[] = {NUM_BUF_POOL0, NUM_BUF_POOL1};
@@ -124,6 +130,36 @@ Void Task_writeback(Void)
 
   /* Notify the result */
   NOTIFY_notify(ID_GPP, MPCSXFER_IPS_ID, MPCSXFER_IPS_EVENTNO, canny_edge_WRITEBACK);
+}
+
+Void Task_magnitude(Void)
+{
+  Uint32 r, c, pos, sq1, sq2;
+  short int *delta_x = (short int *)dsp_buffers[2][0];
+  short int *delta_y = (short int *)dsp_buffers[3][0];
+  int row = (int) dsp_buffers[4][0];
+  int col = (int) dsp_buffers[5][0];
+  short int *magnitude = (short int *)dsp_buffers[6][0];
+
+   /* Invalidate cache */
+//  BCACHE_inv (dsp_buffers[2][0], buffer_sizes[2], TRUE);
+//  BCACHE_inv (dsp_buffers[3][0], buffer_sizes[3], TRUE);
+
+  for(r=0,pos=0; r<row; r++)
+  {
+    for(c=0; c<col; c++,pos++)
+    {
+        sq1 = (int)delta_x[pos] * (int)delta_x[pos];
+        sq2 = (int)delta_y[pos] * (int)delta_y[pos];
+        magnitude[pos] = (short) sq1+sq2;//(0.5 + sqrt((float)sq1 + (float)sq2));
+    }
+  }
+
+  /* Write back and invalidate */
+  BCACHE_wbInv(dsp_buffers[6][0], buffer_sizes[6], TRUE);
+
+  /* Notify the result */
+  NOTIFY_notify(ID_GPP, MPCSXFER_IPS_ID, MPCSXFER_IPS_EVENTNO, DSP_magnitude_x_y);
 }
 
 Int Task_execute (Task_TransferInfo * info)
