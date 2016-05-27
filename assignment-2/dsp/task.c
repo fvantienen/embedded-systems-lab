@@ -32,7 +32,7 @@ enum {
     canny_edge_INIT,                    ///< Initialization stage
     canny_edge_DELETE,                  ///< Shutdown step
     canny_edge_WRITEBACK,               ///< Simple write back program
-    DSP_magnitude_x_y                   ///< Magnitude calculation x,y on DSP program
+    canny_edge_MAGNITUDE                ///< Magnitude calculation x,y on DSP program
 };
 
 Uint32 pool_sizes[] = {NUM_BUF_POOL0, NUM_BUF_POOL1};
@@ -159,7 +159,7 @@ Void Task_magnitude(Void)
   BCACHE_wbInv(dsp_buffers[6][0], buffer_sizes[6], TRUE);
 
   /* Notify the result */
-  NOTIFY_notify(ID_GPP, MPCSXFER_IPS_ID, MPCSXFER_IPS_EVENTNO, DSP_magnitude_x_y);
+  NOTIFY_notify(ID_GPP, MPCSXFER_IPS_ID, MPCSXFER_IPS_EVENTNO, canny_edge_MAGNITUDE);
 }
 
 Int Task_execute (Task_TransferInfo * info)
@@ -238,6 +238,9 @@ static Void Task_notify (Uint32 eventNo, Ptr arg, Ptr info)
       }
       else if((Uint32)info == canny_edge_WRITEBACK) {
         Task_writeback();
+      }
+      else if((Uint32)info == canny_edge_MAGNITUDE) {
+        Task_magnitude();
       }
     }   
 }

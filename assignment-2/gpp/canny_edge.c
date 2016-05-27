@@ -43,11 +43,11 @@ extern "C" {
 #define NUM_BUF_SIZES                    7 ///< Amount of pools to be configured
 #define NUM_BUF_POOL0                    1 ///< Amount of buffers in the first pool
 #define NUM_BUF_POOL1                    1 ///< Amount of buffers in the second pool
-#define NUM_BUF_POOL2                    1 ///< Amount of buffers in the second pool
-#define NUM_BUF_POOL3                    1 ///< Amount of buffers in the second pool
-#define NUM_BUF_POOL4                    1 ///< Amount of buffers in the second pool
-#define NUM_BUF_POOL5                    1 ///< Amount of buffers in the second pool
-#define NUM_BUF_POOL6                    1 ///< Amount of buffers in the second pool
+#define NUM_BUF_POOL2                    1 ///< Amount of buffers in the third pool
+#define NUM_BUF_POOL3                    1 ///< Amount of buffers in the fourth pool
+#define NUM_BUF_POOL4                    1 ///< Amount of buffers in the fifth pool
+#define NUM_BUF_POOL5                    1 ///< Amount of buffers in the sixth pool
+#define NUM_BUF_POOL6                    1 ///< Amount of buffers in the seventh pool
 #define NUM_BUF_MAX                      1 ///< Maximum amount of buffers in pool
 #define canny_edge_IPS_ID                0 ///< IPS ID used for sending notifications to the DPS
 #define canny_edge_IPS_EVENTNO           5 ///< Event number used for notifications to the DSP
@@ -55,14 +55,15 @@ extern "C" {
 enum {
     canny_edge_INIT,                    ///< Initialization stage
     canny_edge_DELETE,                  ///< Shutdown step
-    canny_edge_WRITEBACK                ///< Simple write back program
+    canny_edge_WRITEBACK,               ///< Simple write back program
+    canny_edge_MAGNITUDE                ///< Magnitude calculation x,y on DSP program
 };
 
 /* General variables */
 sem_t sem;                                              ///< Semaphore used for synchronising events
 unsigned char *canny_edge_image;                        ///< The canny edge input image
 int canny_edge_rows, canny_edge_cols;                   ///< The canny edge input width and height
-Uint32 pool_sizes[] = {NUM_BUF_POOL0, NUM_BUF_POOL1, NUM_BUF_POOL2, NUM_BUF_POOL3, NUM_BUF_POOL4, NUM_BUF_POOL5};   ///< The pool sizes
+Uint32 pool_sizes[] = {NUM_BUF_POOL0, NUM_BUF_POOL1, NUM_BUF_POOL2, NUM_BUF_POOL3, NUM_BUF_POOL4, NUM_BUF_POOL5, NUM_BUF_POOL6};   ///< The pool sizes
 Uint32 buffer_sizes[NUM_BUF_SIZES];                     ///< The buffer sizes
 Void *buffers[NUM_BUF_SIZES][NUM_BUF_MAX];              ///< The buffers
 Void *dsp_buffers[NUM_BUF_SIZES][NUM_BUF_MAX];          ///< Buffer addresses on the DSP
@@ -146,9 +147,10 @@ NORMAL_API DSP_STATUS canny_edge_Create (	IN Char8 * dspExecutable,
     buffer_sizes[0] = DSPLINK_ALIGN(sizeof(unsigned char) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN);
     buffer_sizes[1] = DSPLINK_ALIGN(sizeof(short int) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN);
     buffer_sizes[2] = DSPLINK_ALIGN(sizeof(short int) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN);
-    buffer_sizes[3] = DSPLINK_ALIGN(sizeof(int), DSPLINK_BUF_ALIGN);
+    buffer_sizes[3] = DSPLINK_ALIGN(sizeof(short int) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN);
     buffer_sizes[4] = DSPLINK_ALIGN(sizeof(int), DSPLINK_BUF_ALIGN);
-    buffer_sizes[5] = DSPLINK_ALIGN(sizeof(short int) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN);
+    buffer_sizes[5] = DSPLINK_ALIGN(sizeof(int), DSPLINK_BUF_ALIGN);
+    buffer_sizes[6] = DSPLINK_ALIGN(sizeof(short int) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN);
 
     /*
      *  Open the pool.
@@ -325,7 +327,7 @@ STATIC void canny_edge_Writeback (Uint8 processorId)
 }
 
 /* DSP communication for magnitude calculation function */
-STATIC void DSP_magnitude_x_y(Uint8 processorId)
+STATIC void DSP_magnitude_x_y (Uint8 processorId)
 {
      int i, status;
      unsigned char *magnitude = (unsigned char *)buffers[6][0];
@@ -349,7 +351,7 @@ STATIC void DSP_magnitude_x_y(Uint8 processorId)
                     buffer_sizes[5]);
 
 
-    NOTIFY_notify (processorId, canny_edge_IPS_ID, canny_edge_IPS_EVENTNO, DSP_magnitude_x_y);
+    NOTIFY_notify (processorId, canny_edge_IPS_ID, canny_edge_IPS_EVENTNO, canny_edge_MAGNITUDE);
     VPRINT("  DSP_magnitude_x_y send, waiting for response...\r\n");
 
     /* Wait for the response */
@@ -359,6 +361,7 @@ STATIC void DSP_magnitude_x_y(Uint8 processorId)
     POOL_invalidate(POOL_makePoolId(processorId, SAMPLE_POOL_ID),
                     buffers[6][0],
                     buffer_sizes[6]);
+    VPRINT(" DSP_magnitude_x_y done! (Result not verified) ");
 
     // /* Check if the result is correct */
     // if(VERIFY) {
