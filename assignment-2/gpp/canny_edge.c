@@ -79,10 +79,13 @@ Void *dsp_buffers[NUM_BUF_SIZES][NUM_BUF_MAX];          ///< Buffer addresses on
 STATIC Void canny_edge_Notify(Uint32 eventNo, Pvoid arg, Pvoid info);
 STATIC void gaussian_smooth(unsigned char *image, short int* smoothedim, int rows, int cols, float sigma);
 STATIC void make_gaussian_kernel(float sigma, float **kernel, int *windowsize);
-STATIC void derrivative_x_y(short int *smoothedim, int rows, int cols,
+STATIC void derivative_x_y(short int *smoothedim, int rows, int cols,
         short int **delta_x, short int **delta_y);
 STATIC void magnitude_x_y(short int *delta_x, short int *delta_y, int rows, int cols,
                    short int *magnitude);
+STATIC void DSP_magnitude_x_y (short int *delta_x, short int *delta_y, int rows, int cols,
+                   short int *magnitude, Uint8 processorId);
+STATIC void magnitude_x_y_rt(int rows, int cols, short int *magnitude_square, short int *magnitude);
 STATIC void radian_direction(short int *delta_x, short int *delta_y, int rows,
                       int cols, float **dir_radians, int xdirtag, int ydirtag);
 STATIC double angle_radians(double x, double y);
@@ -327,17 +330,19 @@ STATIC void canny_edge_Writeback (Uint8 processorId)
 }
 
 /* DSP communication for magnitude calculation function */
-STATIC void DSP_magnitude_x_y (Uint8 processorId)
+STATIC void DSP_magnitude_x_y (short int *delta_x, short int *delta_y, int rows, int cols,
+                   short int *magnitude, Uint8 processorId)
 {
      int i, status;
-     unsigned char *magnitude = (unsigned char *)buffers[6][0];
+     short int *GPP_magnitude = (short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
+     short int *magnitude_square = buffers[6][0];
 
     /* Send the input data */
-    // Send deriv_x
+    // Send delta_x
     POOL_writeback (POOL_makePoolId(processorId, SAMPLE_POOL_ID),
                     buffers[2][0],
                     buffer_sizes[2]);
-    // Send deriv_y
+    // Send delta_y
     POOL_writeback (POOL_makePoolId(processorId, SAMPLE_POOL_ID),
                     buffers[3][0],
                     buffer_sizes[3]);
@@ -352,30 +357,46 @@ STATIC void DSP_magnitude_x_y (Uint8 processorId)
 
 
     NOTIFY_notify (processorId, canny_edge_IPS_ID, canny_edge_IPS_EVENTNO, canny_edge_MAGNITUDE);
-    VPRINT("  DSP_magnitude_x_y send, waiting for response...\r\n");
+    VPRINT("  DSP_magnitude_x_y_sq send, waiting for response...\r\n");
 
     /* Wait for the response */
     sem_wait(&sem);
+
+    // Do sqrt on GPP
+    magnitude_x_y_rt(canny_edge_rows, canny_edge_cols, magnitude_square, magnitude);
 
     /* Invalidate the result */
     POOL_invalidate(POOL_makePoolId(processorId, SAMPLE_POOL_ID),
                     buffers[6][0],
                     buffer_sizes[6]);
-    VPRINT(" DSP_magnitude_x_y done! (Result not verified) ");
 
-    // /* Check if the result is correct */
-    // if(VERIFY) {
-    //     status = DSP_SOK;
-    //     for(i = 0; i < buffer_sizes[6]; i++) {
-    //         if(buf[i] != canny_edge_image[i]) {
-    //             fprintf(stderr, "Got incorrect image back! Expected %d, Got %d (i: %d)\r\n", canny_edge_image[i], buf[i], i);
-    //             status = DSP_EFAIL;
-    //         }
-    //     }
+    /* Check if the result is correct */
+    if(VERIFY) {
+        status = DSP_SOK;
+        magnitude_x_y(delta_x, delta_y, canny_edge_rows, canny_edge_cols, GPP_magnitude);
+        for(i = 0; i < buffer_sizes[6]; i++) {
+            if(magnitude[i] != GPP_magnitude[i]) {
+                fprintf(stderr, "Got incorrect magnitude result back! Expected %d, Got %d (i: %d)\r\n", GPP_magnitude[i], magnitude[i], i);
+                status = DSP_EFAIL;
+            }
+        }
 
-    //     if(DSP_SUCCEEDED(status))
-    //         VPRINT("Execution of DSP_magnitude_x_y was succesfull!\r\n");
-    // }
+        if(DSP_SUCCEEDED(status))
+            VPRINT("Execution of DSP_magnitude_x_y was succesfull!\r\n");
+    }
+}
+
+STATIC void magnitude_x_y_rt(int rows, int cols, short int *magnitude_square, short int *magnitude)
+{
+    int r, c, pos;
+
+    for(r=0,pos=0; r<rows; r++)
+    {
+        for(c=0; c<cols; c++,pos++)
+        {
+            magnitude[pos] = (short)(0.5 + sqrt((float)magnitude_square[pos]));
+        }
+    }
 }
 
 /** ============================================================================
@@ -394,14 +415,16 @@ NORMAL_API DSP_STATUS canny_edge_Execute (Uint8 processorId, IN Char8 * strImage
     short int *smoothedim = (short int *)buffers[1][0];
     short int *delta_x = (short int *)buffers[2][0]; //(short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
     short int *delta_y = (short int *)buffers[3][0]; //(short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
-    int row = (int) buffers[4][0];
-    int col = (int) buffers[5][0];
+    int *row = (int *) buffers[4][0];
+    int *col = (int *) buffers[5][0];
     short int *magnitude = (short int *)buffers[6][0]; //malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
     unsigned char *nms = (unsigned char *)malloc(sizeof(unsigned char) * canny_edge_rows * canny_edge_cols);
     unsigned char *edge = (unsigned char *)malloc(sizeof(unsigned char) * canny_edge_rows * canny_edge_cols);
     char outfilename[128];    /* Name of the output "edge" image */
 
     VPRINT("Entered canny_edge_Execute ()\n");
+    *row = canny_edge_rows;
+    *col = canny_edge_cols;
 
     /* Copy the open image (since this is generated by PGM IO) */
     memcpy(image, canny_edge_image, buffer_sizes[0]);
@@ -417,13 +440,13 @@ NORMAL_API DSP_STATUS canny_edge_Execute (Uint8 processorId, IN Char8 * strImage
     VPRINT(" Starting guassian smoothing\r\n");
     gaussian_smooth(image, smoothedim, canny_edge_rows, canny_edge_cols, SIGMA);
 
-    /* Calculate the derrivatives */
-    VPRINT(" Starting derrivative x, y\r\n");
-    derrivative_x_y(smoothedim, canny_edge_rows, canny_edge_cols, &delta_x, &delta_y);
+    /* Calculate the derivatives */
+    VPRINT(" Starting derivative x, y\r\n");
+    derivative_x_y(smoothedim, canny_edge_rows, canny_edge_cols, &delta_x, &delta_y);
 
     /* Compute the magnitude on DSP */
-    VPRINT(" Starting magnitude x,y on DSP\r\n");
-    DSP_magnitude_x_y(processorId);
+    VPRINT(" Starting magnitude x, y on DSP\r\n");
+    DSP_magnitude_x_y(delta_x, delta_y, canny_edge_rows, canny_edge_cols, magnitude, processorId);
 
     /* Compute the magnitude */
     VPRINT(" Starting magnitude x, y\r\n");
@@ -603,7 +626,10 @@ STATIC Void canny_edge_Notify (Uint32 eventNo, Pvoid arg, Pvoid info)
         sem_post(&sem);
     } else if((int)info == canny_edge_WRITEBACK) {
         sem_post(&sem);
+    } else if((int)info == canny_edge_MAGNITUDE) {
+        sem_post(&sem);
     }
+
 }
 
 /*******************************************************************************
@@ -707,7 +733,7 @@ STATIC void magnitude_x_y(short int *delta_x, short int *delta_y, int rows, int 
 
 
 /*******************************************************************************
-* PROCEDURE: derrivative_x_y
+* PROCEDURE: derivative_x_y
 * PURPOSE: Compute the first derivative of the image in both the x any y
 * directions. The differential filters that are used are:
 *
@@ -718,7 +744,7 @@ STATIC void magnitude_x_y(short int *delta_x, short int *delta_y, int rows, int 
 * NAME: Mike Heath
 * DATE: 2/15/96
 *******************************************************************************/
-STATIC void derrivative_x_y(short int *smoothedim, int rows, int cols,
+STATIC void derivative_x_y(short int *smoothedim, int rows, int cols,
         short int **delta_x, short int **delta_y)
 {
    int r, c, pos;
