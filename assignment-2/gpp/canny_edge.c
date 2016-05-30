@@ -69,16 +69,17 @@ Void *dsp_buffers[NUM_BUF_SIZES][NUM_BUF_MAX];          ///< Buffer addresses on
 #define TLOW 0.5
 #define THIGH 0.5
 
-/* Used functions */
+/* Used DSP functions */
 STATIC Void canny_edge_Notify(Uint32 eventNo, Pvoid arg, Pvoid info);
+STATIC Void canny_edge_Writeback(unsigned char *image, int rows, int cols, Uint8 processorId);
+
+/* Used GPP functions */
 STATIC void gaussian_smooth(unsigned char *image, short int* smoothedim, int rows, int cols, float sigma);
 STATIC void make_gaussian_kernel(float sigma, float **kernel, int *windowsize);
 STATIC void derrivative_x_y(short int *smoothedim, int rows, int cols,
         short int **delta_x, short int **delta_y);
 STATIC void magnitude_x_y(short int *delta_x, short int *delta_y, int rows, int cols,
                    short int *magnitude);
-STATIC void radian_direction(short int *delta_x, short int *delta_y, int rows,
-                      int cols, float **dir_radians, int xdirtag, int ydirtag);
 STATIC double angle_radians(double x, double y);
 
 
@@ -228,6 +229,29 @@ NORMAL_API DSP_STATUS canny_edge_Create (	IN Char8 * dspExecutable,
      */
     sem_wait(&sem);
 
+    /*
+     * Send the image cols and rows
+     */
+    status = NOTIFY_notify (processorId,
+                            canny_edge_IPS_ID,
+                            canny_edge_IPS_EVENTNO,
+                            (Uint32) canny_edge_cols);
+    if (DSP_FAILED (status)) 
+    {
+        fprintf(stderr, "NOTIFY_notify () DataBuf failed. Status = [0x%x]\n", (int)status);
+        return status;
+    }
+
+    status = NOTIFY_notify (processorId,
+                            canny_edge_IPS_ID,
+                            canny_edge_IPS_EVENTNO,
+                            (Uint32) canny_edge_rows);
+    if (DSP_FAILED (status)) 
+    {
+        fprintf(stderr, "NOTIFY_notify () DataBuf failed. Status = [0x%x]\n", (int)status);
+        return status;
+    }
+
 
     /*
      *  Go through all buffers to initialize them on the DSP
@@ -278,15 +302,14 @@ long long get_usec(void)
 }
 
 /* Simple function which transmits the image and expects it back with each pixel +1 */
-STATIC void canny_edge_Writeback (Uint8 processorId)
+STATIC Void canny_edge_Writeback(unsigned char *image, int rows, int cols, Uint8 processorId)
 {
     int i, status;
-    unsigned char *buf = (unsigned char *)buffers[0][0];
 
     /* Send the image */
     POOL_writeback (POOL_makePoolId(processorId, SAMPLE_POOL_ID),
-                    buffers[0][0],
-                    buffer_sizes[0]);
+                    image,
+                    sizeof(unsigned char) * rows * cols);
     NOTIFY_notify (processorId, canny_edge_IPS_ID, canny_edge_IPS_EVENTNO, canny_edge_WRITEBACK);
     VPRINT("  Writeback send, waiting for response...\r\n");
 
@@ -295,16 +318,16 @@ STATIC void canny_edge_Writeback (Uint8 processorId)
 
     /* Invalidate the result */
     POOL_invalidate(POOL_makePoolId(processorId, SAMPLE_POOL_ID),
-                    buffers[0][0],
-                    buffer_sizes[0]);
+                    image,
+                    sizeof(unsigned char) * rows * cols);
 
     /* Check if the result is correct */
     if(VERIFY) {
         status = DSP_SOK;
-        for(i = 0; i < buffer_sizes[0]; i++) {
+        for(i = 0; i < (rows * cols); i++) {
             canny_edge_image[i]++;
-            if(buf[i] != canny_edge_image[i]) {
-                fprintf(stderr, "Got incorrect image back! Expected %d, Got %d (i: %d)\r\n", canny_edge_image[i], buf[i], i);
+            if(image[i] != canny_edge_image[i]) {
+                fprintf(stderr, "Got incorrect image back! Expected %d, Got %d (i: %d)\r\n", canny_edge_image[i], image[i], i);
                 status = DSP_EFAIL;
             }
         }
@@ -343,9 +366,11 @@ NORMAL_API DSP_STATUS canny_edge_Execute (Uint8 processorId, IN Char8 * strImage
     /* Start the timer */
     start_time = get_usec();
 
+#if DO_WRITEBACK
     /* Do a writeback test */
     VPRINT(" Starting writeback\r\n");
-    canny_edge_Writeback(processorId);
+    canny_edge_Writeback(image, canny_edge_rows, canny_edge_cols, processorId);
+#endif
 
     /* Do the guassian smoothing */
     VPRINT(" Starting guassian smoothing\r\n");
@@ -533,53 +558,6 @@ STATIC Void canny_edge_Notify (Uint32 eventNo, Pvoid arg, Pvoid info)
         sem_post(&sem);
     } else if((int)info == canny_edge_WRITEBACK) {
         sem_post(&sem);
-    }
-}
-
-/*******************************************************************************
-* Procedure: radian_direction
-* Purpose: To compute a direction of the gradient image from component dx and
-* dy images. Because not all derriviatives are computed in the same way, this
-* code allows for dx or dy to have been calculated in different ways.
-*
-* FOR X:  xdirtag = -1  for  [-1 0  1]
-*         xdirtag =  1  for  [ 1 0 -1]
-*
-* FOR Y:  ydirtag = -1  for  [-1 0  1]'
-*         ydirtag =  1  for  [ 1 0 -1]'
-*
-* The resulting angle is in radians measured counterclockwise from the
-* xdirection. The angle points "up the gradient".
-*******************************************************************************/
-STATIC void radian_direction(short int *delta_x, short int *delta_y, int rows,
-                      int cols, float **dir_radians, int xdirtag, int ydirtag)
-{
-    int r, c, pos;
-    float *dirim=NULL;
-    double dx, dy;
-
-    /****************************************************************************
-    * Allocate an image to store the direction of the gradient.
-    ****************************************************************************/
-    if((dirim = (float *) malloc(rows*cols* sizeof(float))) == NULL)
-    {
-        fprintf(stderr, "Error allocating the gradient direction image.\n");
-        exit(1);
-    }
-    *dir_radians = dirim;
-
-    for(r=0,pos=0; r<rows; r++)
-    {
-        for(c=0; c<cols; c++,pos++)
-        {
-            dx = (double)delta_x[pos];
-            dy = (double)delta_y[pos];
-
-            if(xdirtag == 1) dx = -dx;
-            if(ydirtag == -1) dy = -dy;
-
-            dirim[pos] = (float)angle_radians(dx, dy);
-        }
     }
 }
 

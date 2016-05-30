@@ -32,6 +32,8 @@ enum {
 Uint32 pool_sizes[] = {NUM_BUF_POOL0, NUM_BUF_POOL1};
 Void *dsp_buffers[NUM_BUF_SIZES][NUM_BUF_MAX];      ///< Buffer addresses on the DSP
 Uint32 buffer_sizes[NUM_BUF_SIZES];                 ///< The buffer sizes
+Uint16 canny_edge_rows = 0;           ///< Columns of the image
+Uint16 canny_edge_cols = 0;           ///< Rows of the image
 
 
 static Void Task_notify (Uint32 eventNo, Ptr arg, Ptr info) ;
@@ -164,6 +166,17 @@ static Void Task_notify (Uint32 eventNo, Ptr arg, Ptr info)
     static Uint8 got_address = 0;
     Task_TransferInfo * mpcsInfo = (Task_TransferInfo *) arg;
     (void) eventNo; // Avoid warning
+
+    // Check if we got columns, rows information
+    if(canny_edge_cols == 0) {
+      canny_edge_cols = (int)info;
+      return;
+    }
+
+    if(canny_edge_rows == 0) {
+      canny_edge_rows = (int)info;
+      return;
+    }
 
     // Check if we received all the pool information
     if(pool_cnt < NUM_BUF_SIZES) {
