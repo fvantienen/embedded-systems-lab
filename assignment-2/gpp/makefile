@@ -13,7 +13,7 @@ SRCS := canny_edge.c gpp_main.c hysteresis.c pgm_io.c
 OBJS :=
 DEBUG :=
 LDFLAGS := -lpthread -lm -static
-CFLAGS := -DDSP -DDEBUG
+CFLAGS := -DDSP -DDEBUG -mfloat-abi=softfp -mfpu=neon
 LIBS :=
 BIN := canny_edge
 

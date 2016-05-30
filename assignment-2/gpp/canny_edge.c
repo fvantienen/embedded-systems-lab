@@ -21,6 +21,7 @@
 #include <string.h>
 #include "pgm_io.h"
 #include "hysteresis.h"
+#include <arm_neon.h>
 
 
 #if defined (__cplusplus)
@@ -72,6 +73,9 @@ Void *dsp_buffers[NUM_BUF_SIZES][NUM_BUF_MAX];          ///< Buffer addresses on
 /* Used DSP functions */
 STATIC Void canny_edge_Notify(Uint32 eventNo, Pvoid arg, Pvoid info);
 STATIC Void canny_edge_Writeback(unsigned char *image, int rows, int cols, Uint8 processorId);
+
+/* Used neon functions */
+STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, int rows, int cols, float sigma);
 
 /* Used GPP functions */
 STATIC void gaussian_smooth(unsigned char *image, short int* smoothedim, int rows, int cols, float sigma);
@@ -374,7 +378,13 @@ NORMAL_API DSP_STATUS canny_edge_Execute (Uint8 processorId, IN Char8 * strImage
 
     /* Do the guassian smoothing */
     VPRINT(" Starting guassian smoothing\r\n");
+#if GAUSSIAN_DSP
+
+#elif GUASSIAN_NEON
+    gaussian_smooth_neon(image, smoothedim, canny_edge_rows, canny_edge_cols, SIGMA);
+#else
     gaussian_smooth(image, smoothedim, canny_edge_rows, canny_edge_cols, SIGMA);
+#endif
 
     /* Calculate the derrivatives */
     VPRINT(" Starting derrivative x, y\r\n");
@@ -770,6 +780,164 @@ STATIC void make_gaussian_kernel(float sigma, float **kernel, int *windowsize)
         for(i=0; i<(*windowsize); i++)
             printf("kernel[%d] = %f\n", i, (*kernel)[i]);
     }
+}
+
+/* Guassian smooth on Neon */
+STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, int rows, int cols, float sigma)
+{
+    int windowsize;          
+    float *tempim,        
+          *kernel;            
+    float *rows_image;                     /* Image for x-smoothing*/
+    float *cols_image;                    /*  Image for y-smoothing*/
+    float neon_kernel[17];               /* New kernel for neon */
+    unsigned int neon_cols=cols+16;     /* Cols value for x-direction*/
+    unsigned int neon_rows=rows+16;     /* Rows value for y-direction*/
+    unsigned int i, k, a, c, r, j,t,b; /*Loop variant*/
+    float32x4_t neon_pixel;       /* Four consecutive pixel values */
+    float32x4_t neon_factor;      /* Four consecutive filter values */
+    float32x4_t temp_dot;         /* The neon multiplication result store here */
+    float dot= 0.0f;              /* The sum of pixel values */
+    float Referkernel = 0.0f;      /* Intermediate sum of filter values considering boundary situation */
+    float sum = 0.0f;             /* The sum of filter values */
+    
+    /****************************************************************************
+    * Create a 1-dimensional gaussian smoothing kernel.
+    ****************************************************************************/
+    VPRINT("   Computing the gaussian smoothing kernel.\n");
+    make_gaussian_kernel(sigma, &kernel, &windowsize);
+
+    /****************************************************************************
+    * Allocate a temporary buffer image and the smoothed image.
+    ****************************************************************************/
+    if((tempim = (float *) malloc(rows*cols* sizeof(float))) == NULL)
+    {
+        fprintf(stderr, "Error allocating the buffer image.\n");
+        exit(1);
+    }
+    
+    /****************************************************************************
+    * Define the new kernel and referenced kernel in boundary case.
+    ****************************************************************************/
+    
+    for (b = 0 ; b <= 16 ; b++)
+    {
+        if(b > 0 && b < 16 )
+            neon_kernel[b] = kernel [b-1];
+        else
+            neon_kernel [b] = 0;    
+    }
+    
+    for( a=8; a<=16; a++){
+        Referkernel += neon_kernel[a];
+    }
+    /****************************************************************************
+    * Blur in the x - direction.
+    ****************************************************************************/
+    VPRINT("   Bluring the image in the X-direction.\n");
+    /* Allocate the memory to new image and set the boundary value as 0. */
+    rows_image = (float*)malloc(neon_cols*rows*sizeof(float));
+    for( i =0; i<rows; i++){
+        memset(&rows_image[i*neon_cols],0,8*sizeof(float));
+
+        for( k=0; k<cols;k++){
+            rows_image[i*neon_cols+8+k] = (float)image[i*cols+k];
+        }
+        memset(&rows_image[i*neon_cols+8+cols],0,8*sizeof(float));
+    }
+
+    for(r=0; r<rows; r++){
+        for( c=0; c<cols; c++){
+            /* Assign different sum value according to pixel position */
+            if(c==0){
+                sum = Referkernel;
+            }
+            else if(c <=8){
+                sum += neon_kernel[8-c];
+            }
+            else if(c>=cols-8){
+                sum -=neon_kernel[cols-c+8];
+            }
+            /*Calculate the middle pixel value based on neon.*/
+            temp_dot = vdupq_n_f32(0);
+            for( j=0; j<=3; j++)
+            {
+                int e=0;
+                if(j>=2)
+                {
+                    e=1;
+                }
+                neon_pixel = vld1q_f32((float32_t const *)&rows_image[r*neon_cols+c+j*4+e]);
+                neon_factor = vld1q_f32((float32_t const *)&neon_kernel[j*4+e]);
+                temp_dot = vmlaq_f32(temp_dot,neon_pixel,neon_factor);
+            }
+            
+    
+            for( t=0; t<=3; t++){   
+                        
+                dot += vgetq_lane_f32(temp_dot,t ); 
+            }
+            dot += rows_image[r*neon_cols+c+8] * neon_kernel[8];
+            tempim[r*cols+c] = dot/sum;
+            dot=0; 
+        }
+    }
+
+
+    /****************************************************************************
+    * Blur in the y - direction.
+    ****************************************************************************/
+    VPRINT("   Bluring the image in the Y-direction.\n");
+    /* Allocate the memory to new image and set the boundary value as 0. The image is stored in unit of cols for convient y-direction smoothing*/
+    cols_image = (float*)malloc(neon_rows*cols*sizeof(float));
+    for( i =0; i<cols; i++){
+        memset(&cols_image[i*neon_rows],0,8*sizeof(float));
+        for( k=0; k<rows;k++){
+            cols_image[i*neon_rows+8+k] = tempim[k*cols+i];
+        }
+        memset(&cols_image[i*neon_rows+8+rows],0,8*sizeof(float));
+    }
+
+
+    for(c=0; c<cols; c++){
+        for( r=0; r<rows; r++){
+            /* Assign different sum value according to pixel position */
+            if(r==0){
+                sum = Referkernel;
+            }
+            else if(r <=8){
+                sum += neon_kernel[8-r];
+            }
+            else if(r>=rows-8){
+                sum -=neon_kernel[rows-r+8];
+            }
+            /*Calculate the middle pixel value based on neon.*/
+            temp_dot = vdupq_n_f32(0);
+            for( j=0; j<=3; j++)
+            {
+                int e=0;
+                if(j>=2)
+                {
+                    e=1;
+                }
+                neon_pixel = vld1q_f32((float32_t const *)&cols_image[c*neon_rows+r+j*4+e]);
+                neon_factor = vld1q_f32((float32_t const *)&neon_kernel[j*4+e]);
+                temp_dot = vmlaq_f32(temp_dot,neon_pixel,neon_factor);
+            }
+            
+        
+            for( t=0; t<=3; t++){              
+                dot += vgetq_lane_f32(temp_dot,t ); 
+            }
+            dot += cols_image[c*neon_rows+r+8] * neon_kernel[8];
+            smoothedim[r*cols+c] = (unsigned short int )(dot*BOOSTBLURFACTOR/sum + 0.5);
+            dot=0; 
+        }
+    }
+    free(rows_image);
+    free(cols_image);
+    free(tempim);
+    free(kernel);
 }
 
 
