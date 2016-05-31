@@ -32,7 +32,8 @@ enum {
     canny_edge_INIT,                    ///< Initialization stage
     canny_edge_DELETE,                  ///< Shutdown step
     canny_edge_WRITEBACK,               ///< Simple write back program
-    canny_edge_MAGNITUDE                ///< Magnitude calculation x,y on DSP program
+    canny_edge_MAGNITUDE,               ///< Magnitude calculation x,y on DSP program
+    canny_edge_DERIVATIVE               ///< Derivative calculation x,y on DSP program
 };
 
 Uint32 pool_sizes[] = {NUM_BUF_POOL0, NUM_BUF_POOL1, NUM_BUF_POOL2, NUM_BUF_POOL3, NUM_BUF_POOL4, NUM_BUF_POOL5, NUM_BUF_POOL6};
@@ -137,8 +138,8 @@ Void Task_magnitude(Void)
   Uint32 r, c, pos, sq1, sq2;
   short int *delta_x = (short int *)dsp_buffers[2][0];
   short int *delta_y = (short int *)dsp_buffers[3][0];
-  int *row = (int *) dsp_buffers[4][0];
-  int *col = (int *) dsp_buffers[5][0];
+  int *rows = (int *) dsp_buffers[4][0];
+  int *cols = (int *) dsp_buffers[5][0];
   short int *magnitude = (short int *)dsp_buffers[6][0];
 
    /* Invalidate cache */
@@ -147,9 +148,9 @@ Void Task_magnitude(Void)
   BCACHE_inv (dsp_buffers[4][0], buffer_sizes[4], TRUE);
   BCACHE_inv (dsp_buffers[5][0], buffer_sizes[5], TRUE);
 
-  for(r=0,pos=0; r<*row; r++)
+  for(r=0,pos=0; r<*rows; r++)
   {
-    for(c=0; c<*col; c++,pos++)
+    for(c=0; c<*cols; c++,pos++)
     {
         sq1 = (int)delta_x[pos] * (int)delta_x[pos];
         sq2 = (int)delta_y[pos] * (int)delta_y[pos];
@@ -162,6 +163,52 @@ Void Task_magnitude(Void)
 
   /* Notify the result */
   NOTIFY_notify(ID_GPP, MPCSXFER_IPS_ID, MPCSXFER_IPS_EVENTNO, canny_edge_MAGNITUDE);
+}
+
+Void Task_derivative(Void)
+{
+  Uint32 r, c, pos;
+  short int *smoothedim = (short int *)dsp_buffers[1][0];
+  short int *delta_x = (short int *)dsp_buffers[2][0];
+  short int *delta_y = (short int *)dsp_buffers[3][0];
+  int *rows = (int *) dsp_buffers[4][0];
+  int *cols = (int *) dsp_buffers[5][0];
+
+  /* Invalidate cache */
+  BCACHE_inv (dsp_buffers[1][0], buffer_sizes[1], TRUE);
+  BCACHE_inv (dsp_buffers[4][0], buffer_sizes[4], TRUE); // row
+  BCACHE_inv (dsp_buffers[5][0], buffer_sizes[5], TRUE); // col
+
+
+  /* Calculate the X direction */
+  for(r=0; r < *rows; r++){
+    pos = r * (*cols);
+    (delta_x)[pos] = smoothedim[pos+1] - smoothedim[pos];
+    pos++;
+    for(c=1;c<(*cols-1); c++, pos++){
+      (delta_x)[pos] = smoothedim[pos+1] - smoothedim[pos-1];
+    }
+    (delta_x)[pos] = smoothedim[pos] - smoothedim[pos-1];
+  }
+
+  /* Calculate the Y direction */
+  for(c=0; c < *cols; c++){
+    pos = c;
+    (delta_y)[pos] = smoothedim[pos+ *cols] - smoothedim[pos];
+    pos += (*cols);
+    for(r=1; r < (*rows-1); r++, pos += *cols){
+      (delta_y)[pos] = smoothedim[pos+*cols] - smoothedim[pos - *cols];
+    }
+    (delta_y)[pos] = smoothedim[pos] - smoothedim[pos - *cols];
+  }
+
+  /* Write back and invalidate */
+  BCACHE_wbInv(dsp_buffers[2][0], buffer_sizes[2], TRUE);
+  BCACHE_wbInv(dsp_buffers[3][0], buffer_sizes[3], TRUE);
+
+  /* Notify the GPP that DSP is done */
+  NOTIFY_notify(ID_GPP, MPCSXFER_IPS_ID, MPCSXFER_IPS_EVENTNO, canny_edge_DERIVATIVE);
+
 }
 
 Int Task_execute (Task_TransferInfo * info)
@@ -243,6 +290,9 @@ static Void Task_notify (Uint32 eventNo, Ptr arg, Ptr info)
       }
       else if((Uint32)info == canny_edge_MAGNITUDE) {
         Task_magnitude();
+      }
+      else if((Uint32)info == canny_edge_DERIVATIVE) {
+        Task_derivative();
       }
     }   
 }
