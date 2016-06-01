@@ -1,6 +1,7 @@
 REMOTE_BB=192.168.0.202
 REMOTE_ESL=in4342-03@ce-eslab.ewi.tudelft.nl
 CROSS_COMPILE=1
+BEAGLE_DIR=/home/root/esLAB/assignment-2
 
 all: dsp gpp orig send
 
@@ -17,6 +18,9 @@ send:
 	cd dsp; R=$(R) make send; cd ..
 	cd gpp; R=$(R) make send; cd ..
 	cd orig; R=$(R) make send; cd ..
+
+fetch:
+	scp -r root@$(REMOTE_BB):$(BEAGLE_DIR)/pics/klomp.pgm_out.pgm ./
 
 access:
 	ssh -R2230:$(REMOTE_BB):22 $(REMOTE_ESL)
