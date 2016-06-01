@@ -36,13 +36,13 @@ extern "C" {
 
 /* Enable verbose printing by default */
 #ifndef VERBOSE
-#define VERBOSE 0
+#define VERBOSE 1
 #endif
 #define VPRINT if(VERBOSE) printf
 
 /* Enable verify by default (makes it slower) */
 #ifndef VERIFY
-#define VERIFY 0
+#define VERIFY 1
 #endif
 
 /* Pool and message defines */
@@ -733,6 +733,10 @@ STATIC Void canny_edge_Magnitude(short int *delta_x, short int *delta_y, int row
 /* Guassian smooth on Neon */
 STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Uint16 rows, Uint16 cols, float sigma)
 {
+#if VERIFY
+    short int *verify_smoothedim=(short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
+#endif
+
     int windowsize;          
     float *tempim,        
           *kernel;            
@@ -887,6 +891,25 @@ STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Ui
     free(cols_image);
     free(tempim);
     free(kernel);
+
+#if VERIFY
+    /* Verify guassian smooth neon using the GPP code */
+    gaussian_smooth(image, verify_smoothedim, canny_edge_rows, canny_edge_cols, SIGMA);
+
+    /* Check if it matches */
+    for(i = 0; i < rows*cols; i++) {
+        if(smoothedim[i] != verify_smoothedim[i]) {
+            fprintf(stderr, "Got incorrect guassian smooth result back! Expected %d, Got %d (i: %d)\r\n", verify_smoothedim[i], smoothedim[i], i);
+        }
+    }
+
+    
+    fprintf(stderr, "Execution of guassian_smooth_neon was successful\r\n");
+    
+    free(verify_smoothedim);
+#endif
+
+
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////
