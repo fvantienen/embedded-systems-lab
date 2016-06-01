@@ -167,6 +167,7 @@ NORMAL_API DSP_STATUS canny_edge_Create (	IN Char8 * dspExecutable,
         return DSP_EFAIL;
     }
 
+    VPRINT("Start allocating buffer \n");
     /* Set the buffer sizes based on image size */
     buffer_sizes[0] = DSPLINK_ALIGN(sizeof(unsigned char) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN); //image
     buffer_sizes[1] = DSPLINK_ALIGN(sizeof(short int) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN); //smoothedim
@@ -333,6 +334,7 @@ long long get_usec(void)
   r=t.tv_sec*1000000+t.tv_usec;
   return r;
 }
+
 
 /** ============================================================================
  *  @func   canny_edge_Execute
@@ -998,6 +1000,7 @@ STATIC void magnitude_x_y(short int *delta_x, short int *delta_y, int rows, int 
             sq1 = (int)delta_x[pos] * (int)delta_x[pos];
             sq2 = (int)delta_y[pos] * (int)delta_y[pos];
             magnitude[pos] = (short)(0.5 + sqrt((float)sq1 + (float)sq2));
+            // VPRINT(" Magnitude GPP: %d \r \n", magnitude[pos]);
         }
     }
 }
