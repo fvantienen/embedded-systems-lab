@@ -29,10 +29,10 @@ extern "C" {
 #endif /* defined (__cplusplus) */
 
 /* Enable / Disable DSP/NEON */
-//#define GAUSSIAN_DSP 1
-#define GAUSSIAN_NEON 1
-#define DERIVATIVE_DSP 0
-#define MAGNITUDE_DSP 0
+#define GAUSSIAN_DSP 1
+#define GUASSIAN_NEON 1
+#define DERIVATIVE_DSP 1
+#define MAGNITUDE_DSP 1
 
 /* Enable verbose printing by default */
 #ifndef VERBOSE
@@ -61,6 +61,7 @@ enum {
     canny_edge_INIT,                    ///< Initialization stage
     canny_edge_DELETE,                  ///< Shutdown step
     canny_edge_WRITEBACK,               ///< Simple write back program
+    canny_edge_GAUSSIAN,                ///< Calculate the Gaussian
     canny_edge_DERIVATIVE,              ///< Calculate the derivatives
     canny_edge_MAGNITUDE                ///< Calculate the magnitude
 };
@@ -102,6 +103,7 @@ int windowsize_kernel = 15; /* Dimension of the gaussian kernel. */
 /* Used DSP functions */
 STATIC Void canny_edge_Notify(Uint32 eventNo, Pvoid arg, Pvoid info);
 STATIC Void canny_edge_Writeback(unsigned char *image, int rows, int cols, Uint8 processorId);
+STATIC Void canny_edge_Gaussian(unsigned char *image, int rows, int cols, short int *smoothedim, Uint8 processorId);
 STATIC Void canny_edge_Derivative(short int *smoothedim, int rows, int cols, short int *delta_x, short int *delta_y, Uint8 processorId);
 STATIC Void canny_edge_Magnitude(short int *delta_x, short int *delta_y, int rows, int cols, short int *magnitude, Uint8 processorId);
 
@@ -394,9 +396,9 @@ NORMAL_API DSP_STATUS canny_edge_Execute (Uint8 processorId, IN Char8 * strImage
     /* Do the guassian smoothing */
     VPRINT(" Starting guassian smoothing\r\n");
 #if GAUSSIAN_DSP
-
-#elif GAUSSIAN_NEON
-    gaussian_smooth_neon(image, smoothedim, canny_edge_rows, canny_edge_cols);
+    canny_edge_Gaussian(image, canny_edge_rows, canny_edge_cols, smoothedim, processorId);
+#elif GUASSIAN_NEON
+    gaussian_smooth_neon(image, smoothedim, canny_edge_rows, canny_edge_cols, SIGMA);
 #else
     gaussian_smooth(image, smoothedim, canny_edge_rows, canny_edge_cols);
 #endif
@@ -601,6 +603,8 @@ STATIC Void canny_edge_Notify (Uint32 eventNo, Pvoid arg, Pvoid info)
         sem_post(&sem);
     } else if((int)info == canny_edge_WRITEBACK) {
         sem_post(&sem);
+    } else if((int)info == canny_edge_GAUSSIAN) {
+        sem_post(&sem);
     } else if((int)info == canny_edge_DERIVATIVE) {
         sem_post(&sem);
     } else if((int)info == canny_edge_MAGNITUDE) {
@@ -647,6 +651,52 @@ STATIC Void canny_edge_Writeback(unsigned char *image, int rows, int cols, Uint8
 
     if(DSP_SUCCEEDED(status))
         VPRINT("Writeback was succesfull!\r\n");
+#endif
+}
+
+STATIC Void canny_edge_Gaussian(unsigned char *image, int rows, int cols, short int *smoothedim, Uint8 processorId)
+{
+#if VERIFY
+    int i;
+    int status = DSP_SOK;
+    short int *verify_smoothedim = (short int *) malloc(sizeof(short int) * rows * cols);
+#endif
+
+    POOL_writeback (POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                    image,
+                    buffer_sizes[0]);
+
+    /* Notify DSP */
+    NOTIFY_notify (processorId, canny_edge_IPS_ID, canny_edge_IPS_EVENTNO, canny_edge_GAUSSIAN);
+    VPRINT("  DSP_Gaussian send, waiting for response...\r\n");
+
+     /* Wait for the response */
+    sem_wait(&sem);
+
+    /* Invalidate the result */
+    POOL_invalidate(POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                    smoothedim,
+                    buffer_sizes[1]);
+    /* Check if the result is correct */
+#if VERIFY
+    /* Verify gaussian smooth dsp using the GPP code */
+    gaussian_smooth(image, verify_smoothedim, canny_edge_rows, canny_edge_cols, SIGMA);
+
+    /* Check if it matches */
+    for(i = 0; i < rows*cols; i++) {
+        if(smoothedim[i] != verify_smoothedim[i]) {
+            fprintf(stderr, "Got incorrect guassian smooth result back! Expected %d, Got %d (i: %d)\r\n", verify_smoothedim[i], smoothedim[i], i);
+            status = DSP_EFAIL;
+        }
+    }
+
+    if(DSP_SUCCEEDED(status)) {
+        VPRINT("Execution of canny_edge_Gaussian was succesfull!\r\n");
+    }
+    else {
+        fprintf(stderr, "Execution of canny_edge_Gaussian FAILED!\r\n");
+    }
+    free(verify_smoothedim);
 #endif
 }
 
