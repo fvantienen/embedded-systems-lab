@@ -1008,6 +1008,13 @@ STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Ui
 
 STATIC void derivative_x_y_neon(short int *smoothedim, int rows, int cols, short int **delta_x, short int **delta_y)
 {
+#if VERIFY
+    int i;
+    int derivative_neon_fail = 0; //flag
+    short int *verify_delta_x = (short int *) malloc(sizeof(short int) * rows * cols);
+    short int *verify_delta_y = (short int *) malloc(sizeof(short int) * rows * cols);
+#endif
+
    int r, c, pos;
    /****************************************************************************
    * Allocate images to store the derivatives.
@@ -1050,7 +1057,40 @@ STATIC void derivative_x_y_neon(short int *smoothedim, int rows, int cols, short
    	vector_smoothedim_4 = vld1_s16(&(smoothedim[pos-cols]));
    	vector_delta_y = vsub_s16(vector_smoothedim_3, vector_smoothedim_4);
    	vst1_s16(&((*delta_y)[pos]), vector_delta_y);
-   }  
+   }
+
+#if VERIFY
+    /* verify with GPP function */
+    derivative_x_y(smoothedim, rows, cols, &verify_delta_x, &verify_delta_y);
+  
+    /* Check for delta_x*/
+    for(i = 0; i < rows*cols; i++) {
+        if((*delta_x)[i] != verify_delta_x[i]) {
+            fprintf(stderr, "Got incorrect delta_x using Neon! Expected %d, Got %d (i: %d)\r\n", verify_delta_x[i], (*delta_x)[i], i);
+            derivative_neon_fail = 1;
+        }
+    }
+
+    /* Check for delta_y*/
+    for(i = 0; i < rows*cols; i++) {
+        if((*delta_y)[i] != verify_delta_y[i]) {
+            fprintf(stderr, "Got incorrect delta_y using Neon! Expected %d, Got %d (i: %d)\r\n", verify_delta_y[i], (*delta_y)[i], i);
+            derivative_neon_fail = 1;
+        }
+    }
+
+    /* Print if verify was succesfull */
+    if(derivative_neon_fail == 0) {
+        VPRINT("Execution of derivative_x_y_neon was succesfull!\r\n");
+    }
+    else {
+        fprintf(stderr, "Execution of derivative_x_y_neon was FAILED!\r\n");
+    }
+
+    free(verify_delta_x);
+    free(verify_delta_y);
+#endif
+
 }
 
 STATIC void magnitude_x_y_neon(short int *delta_x, short int *delta_y, int rows, int cols, short int *magnitude)
