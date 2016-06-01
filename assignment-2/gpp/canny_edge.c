@@ -30,7 +30,7 @@ extern "C" {
 
 /* Enable / Disable DSP/NEON */
 //#define GAUSSIAN_DSP 1
-//#define GUASSIAN_NEON 1
+#define GUASSIAN_NEON 1
 #define DERIVATIVE_DSP 1
 #define MAGNITUDE_DSP 1
 
@@ -815,9 +815,9 @@ STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Ui
                 {
                     e=1;
                 }
-                //neon_pixel = vld1q_f32((float32_t const *)&rows_image[r*neon_cols+c+j*4+e]);
-                //neon_factor = vld1q_f32((float32_t const *)&neon_kernel[j*4+e]);
-                //temp_dot = vmlaq_f32(temp_dot, neon_pixel, neon_factor);
+                neon_pixel = vld1q_f32((float32_t const *)&rows_image[r*neon_cols+c+j*4+e]);
+                neon_factor = vld1q_f32((float32_t const *)&neon_kernel[j*4+e]);
+                temp_dot = vmlaq_f32(temp_dot, neon_pixel, neon_factor);
             }
             
     
