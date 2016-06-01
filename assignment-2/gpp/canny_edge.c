@@ -612,7 +612,9 @@ STATIC Void canny_edge_Writeback(unsigned char *image, int rows, int cols, Uint8
 STATIC Void canny_edge_Gaussian(unsigned char *image, int rows, int cols, short int *smoothedim, Uint8 processorId)
 {
 #if VERIFY
-    int i, status;
+    int i;
+    int status = DSP_SOK;
+    short int *verify_smoothedim = (short int *) malloc(sizeof(short int) * rows * cols);
 #endif
 
     POOL_writeback (POOL_makePoolId(processorId, SAMPLE_POOL_ID),
@@ -631,6 +633,26 @@ STATIC Void canny_edge_Gaussian(unsigned char *image, int rows, int cols, short 
                     smoothedim,
                     buffer_sizes[1]);
     /* Check if the result is correct */
+#if VERIFY
+    /* Verify gaussian smooth dsp using the GPP code */
+    gaussian_smooth(image, verify_smoothedim, canny_edge_rows, canny_edge_cols, SIGMA);
+
+    /* Check if it matches */
+    for(i = 0; i < rows*cols; i++) {
+        if(smoothedim[i] != verify_smoothedim[i]) {
+            fprintf(stderr, "Got incorrect guassian smooth result back! Expected %d, Got %d (i: %d)\r\n", verify_smoothedim[i], smoothedim[i], i);
+            status = DSP_EFAIL;
+        }
+    }
+
+    if(DSP_SUCCEEDED(status)) {
+        VPRINT("Execution of canny_edge_Gaussian was succesfull!\r\n");
+    }
+    else {
+        fprintf(stderr, "Execution of canny_edge_Gaussian FAILED!\r\n");
+    }
+    free(verify_smoothedim);
+#endif
 }
 
 STATIC Void canny_edge_Derivative(short int *smoothedim, int rows, int cols, short int *delta_x, short int *delta_y, Uint8 processorId)
