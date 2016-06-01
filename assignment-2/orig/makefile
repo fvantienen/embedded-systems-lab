@@ -83,7 +83,7 @@ remote-prof:
 	ssh -C $(REMOTE_ESL) "cd $(ESL_DIR); make clean && make gprof"
 
 # Send it trough SCP
-send: $(EXEC)
+send:
 	echo "Sending $(EXEC) to beagleboard ... "
 	scp -r $(EXEC) pics $(REMOTE_BB):$(BEAGLE_DIR)/.
 

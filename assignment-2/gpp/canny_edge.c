@@ -28,6 +28,12 @@
 extern "C" {
 #endif /* defined (__cplusplus) */
 
+/* Enable / Disable DSP/NEON */
+//#define GAUSSIAN_DSP 1
+#define GAUSSIAN_NEON 1
+#define DERIVATIVE_DSP 0
+#define MAGNITUDE_DSP 0
+
 /* Enable verbose printing by default */
 #ifndef VERBOSE
 #define VERBOSE 1
@@ -41,9 +47,12 @@ extern "C" {
 
 /* Pool and message defines */
 #define SAMPLE_POOL_ID                   0 ///< Pool number used for data transfers
-#define NUM_BUF_SIZES                    2 ///< Amount of pools to be configured
+#define NUM_BUF_SIZES                    5 ///< Amount of pools to be configured
 #define NUM_BUF_POOL0                    1 ///< Amount of buffers in the first pool
 #define NUM_BUF_POOL1                    1 ///< Amount of buffers in the second pool
+#define NUM_BUF_POOL2                    1 ///< Amount of buffers in the thrid pool
+#define NUM_BUF_POOL3                    1 ///< Amount of buffers in the fourth pool
+#define NUM_BUF_POOL4                    1 ///< Amount of buffers in the fifth pool
 #define NUM_BUF_MAX                      1 ///< Maximum amount of buffers in pool
 #define canny_edge_IPS_ID                0 ///< IPS ID used for sending notifications to the DPS
 #define canny_edge_IPS_EVENTNO           5 ///< Event number used for notifications to the DSP
@@ -51,17 +60,37 @@ extern "C" {
 enum {
     canny_edge_INIT,                    ///< Initialization stage
     canny_edge_DELETE,                  ///< Shutdown step
-    canny_edge_WRITEBACK                ///< Simple write back program
+    canny_edge_WRITEBACK,               ///< Simple write back program
+    canny_edge_DERIVATIVE,              ///< Calculate the derivatives
+    canny_edge_MAGNITUDE                ///< Calculate the magnitude
 };
 
 /* General variables */
 sem_t sem;                                              ///< Semaphore used for synchronising events
 unsigned char *canny_edge_image;                        ///< The canny edge input image
 int canny_edge_rows, canny_edge_cols;                   ///< The canny edge input width and height
-Uint32 pool_sizes[] = {NUM_BUF_POOL0, NUM_BUF_POOL1};   ///< The pool sizes
+Uint32 pool_sizes[] = {NUM_BUF_POOL0, NUM_BUF_POOL1, NUM_BUF_POOL2, NUM_BUF_POOL3, NUM_BUF_POOL4};   ///< The pool sizes
 Uint32 buffer_sizes[NUM_BUF_SIZES];                     ///< The buffer sizes
 Void *buffers[NUM_BUF_SIZES][NUM_BUF_MAX];              ///< The buffers
 Void *dsp_buffers[NUM_BUF_SIZES][NUM_BUF_MAX];          ///< Buffer addresses on the DSP
+
+/* Precomputed kernel values for the Gaussian smooth function */
+float gaussian_kernel[] = { 0.0031742106657475233078003,  /* kernel[0] */
+                            0.0089805237948894500732422,  /* kernel[1] */
+                            0.0216511301696300506591797,  /* kernel[2] */
+                            0.0444807782769203186035156,  /* kernel[3] */
+                            0.0778712481260299682617188,  /* kernel[4] */
+                            0.1161702200770378112792969,  /* kernel[5] */
+                            0.1476812809705734252929688,  /* kernel[6] */
+                            0.1599812060594558715820312,  /* kernel[7] */
+                            0.1476812809705734252929688,  /* kernel[8] */
+                            0.1161702200770378112792969,  /* kernel[9] */
+                            0.0778712481260299682617188,  /* kernel[10] */
+                            0.0444807782769203186035156,  /* kernel[11] */
+                            0.0216511301696300506591797,  /* kernel[12] */
+                            0.0089805237948894500732422,  /* kernel[13] */
+                            0.0031742106657475233078003}; /* kernel[14] */
+int windowsize_kernel = 15; /* Dimension of the gaussian kernel. */
 
 
 /* Specific canny edge variables */
@@ -73,17 +102,17 @@ Void *dsp_buffers[NUM_BUF_SIZES][NUM_BUF_MAX];          ///< Buffer addresses on
 /* Used DSP functions */
 STATIC Void canny_edge_Notify(Uint32 eventNo, Pvoid arg, Pvoid info);
 STATIC Void canny_edge_Writeback(unsigned char *image, int rows, int cols, Uint8 processorId);
+STATIC Void canny_edge_Derivative(short int *smoothedim, int rows, int cols, short int *delta_x, short int *delta_y, Uint8 processorId);
+STATIC Void canny_edge_Magnitude(short int *delta_x, short int *delta_y, int rows, int cols, short int *magnitude, Uint8 processorId);
 
 /* Used neon functions */
-STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, int rows, int cols, float sigma);
+STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Uint16 rows, Uint16 cols);
 
 /* Used GPP functions */
-STATIC void gaussian_smooth(unsigned char *image, short int* smoothedim, int rows, int cols, float sigma);
+STATIC void gaussian_smooth(unsigned char *image, short int* smoothedim, int rows, int cols);
 STATIC void make_gaussian_kernel(float sigma, float **kernel, int *windowsize);
-STATIC void derrivative_x_y(short int *smoothedim, int rows, int cols,
-        short int **delta_x, short int **delta_y);
-STATIC void magnitude_x_y(short int *delta_x, short int *delta_y, int rows, int cols,
-                   short int *magnitude);
+STATIC void derivative_x_y(short int *smoothedim, int rows, int cols, short int **delta_x, short int **delta_y);
+STATIC void magnitude_x_y(short int *delta_x, short int *delta_y, int rows, int cols, short int *magnitude);
 STATIC double angle_radians(double x, double y);
 
 
@@ -104,10 +133,7 @@ NORMAL_API DSP_STATUS canny_edge_Create (	IN Char8 * dspExecutable,
     SMAPOOL_Attrs   poolAttrs;
     Uint16          i, j;
 
-	#ifdef DEBUG
-    printf ("Entered canny_edge_Create ()\n") ;
-	#endif
- 
+    VPRINT("Entered canny_edge_Create ()\n") ;
     sem_init(&sem,0,0);
 
     /*
@@ -141,9 +167,13 @@ NORMAL_API DSP_STATUS canny_edge_Create (	IN Char8 * dspExecutable,
         return DSP_EFAIL;
     }
 
+    VPRINT("Start allocating buffer \n");
     /* Set the buffer sizes based on image size */
-    buffer_sizes[0] = DSPLINK_ALIGN(sizeof(unsigned char) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN);
-    buffer_sizes[1] = DSPLINK_ALIGN(sizeof(short int) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN);
+    buffer_sizes[0] = DSPLINK_ALIGN(sizeof(unsigned char) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN); //image
+    buffer_sizes[1] = DSPLINK_ALIGN(sizeof(short int) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN); //smoothedim
+    buffer_sizes[2] = DSPLINK_ALIGN(sizeof(short int) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN); //delta_x
+    buffer_sizes[3] = DSPLINK_ALIGN(sizeof(short int) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN); //delta_y
+    buffer_sizes[4] = DSPLINK_ALIGN(sizeof(int) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN); //magnitude
 
     /*
      *  Open the pool.
@@ -305,41 +335,6 @@ long long get_usec(void)
   return r;
 }
 
-/* Simple function which transmits the image and expects it back with each pixel +1 */
-STATIC Void canny_edge_Writeback(unsigned char *image, int rows, int cols, Uint8 processorId)
-{
-    int i, status;
-
-    /* Send the image */
-    POOL_writeback (POOL_makePoolId(processorId, SAMPLE_POOL_ID),
-                    image,
-                    sizeof(unsigned char) * rows * cols);
-    NOTIFY_notify (processorId, canny_edge_IPS_ID, canny_edge_IPS_EVENTNO, canny_edge_WRITEBACK);
-    VPRINT("  Writeback send, waiting for response...\r\n");
-
-    /* Wait for the response */
-    sem_wait(&sem);
-
-    /* Invalidate the result */
-    POOL_invalidate(POOL_makePoolId(processorId, SAMPLE_POOL_ID),
-                    image,
-                    sizeof(unsigned char) * rows * cols);
-
-    /* Check if the result is correct */
-    if(VERIFY) {
-        status = DSP_SOK;
-        for(i = 0; i < (rows * cols); i++) {
-            canny_edge_image[i]++;
-            if(image[i] != canny_edge_image[i]) {
-                fprintf(stderr, "Got incorrect image back! Expected %d, Got %d (i: %d)\r\n", canny_edge_image[i], image[i], i);
-                status = DSP_EFAIL;
-            }
-        }
-
-        if(DSP_SUCCEEDED(status))
-            VPRINT("Writeback was succesfull!\r\n");
-    }
-}
 
 /** ============================================================================
  *  @func   canny_edge_Execute
@@ -355,12 +350,16 @@ NORMAL_API DSP_STATUS canny_edge_Execute (Uint8 processorId, IN Char8 * strImage
     long long start_time;
     unsigned char *image = (unsigned char *)buffers[0][0];
     short int *smoothedim = (short int *)buffers[1][0];
-    short int *delta_x = (short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
-    short int *delta_y = (short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
+    short int *delta_x = (short int *)buffers[2][0];
+    short int *delta_y = (short int *)buffers[3][0];
     short int *magnitude = (short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
     unsigned char *nms = (unsigned char *)malloc(sizeof(unsigned char) * canny_edge_rows * canny_edge_cols);
     unsigned char *edge = (unsigned char *)malloc(sizeof(unsigned char) * canny_edge_rows * canny_edge_cols);
     char outfilename[128];    /* Name of the output "edge" image */
+#if VERIFY
+    int i, windowsize;
+    float *kernel;
+#endif
 
     VPRINT("Entered canny_edge_Execute ()\n");
 
@@ -376,23 +375,47 @@ NORMAL_API DSP_STATUS canny_edge_Execute (Uint8 processorId, IN Char8 * strImage
     canny_edge_Writeback(image, canny_edge_rows, canny_edge_cols, processorId);
 #endif
 
+#if VERIFY
+    /* Verify pre-computed (harcoded) kernel values */
+    VPRINT(" Verifying pre-computed kernel values.. \r \n");
+    make_gaussian_kernel(SIGMA, &kernel, &windowsize);
+    for (i = 0; i < windowsize; i++)
+    {
+        if(gaussian_kernel[i] != kernel[i]){
+            fprintf(stderr, "Incorrect kernel value! Expected %f, Got %f (i: %d)\r\n", kernel[i], gaussian_kernel[i], i);
+        }
+    }
+
+    if(DSP_SUCCEEDED(status)) {
+        VPRINT("Precomputed kernel values are correct!\r\n");
+    }
+#endif
+
     /* Do the guassian smoothing */
     VPRINT(" Starting guassian smoothing\r\n");
 #if GAUSSIAN_DSP
 
-#elif GUASSIAN_NEON
-    gaussian_smooth_neon(image, smoothedim, canny_edge_rows, canny_edge_cols, SIGMA);
+#elif GAUSSIAN_NEON
+    gaussian_smooth_neon(image, smoothedim, canny_edge_rows, canny_edge_cols);
 #else
-    gaussian_smooth(image, smoothedim, canny_edge_rows, canny_edge_cols, SIGMA);
+    gaussian_smooth(image, smoothedim, canny_edge_rows, canny_edge_cols);
 #endif
 
-    /* Calculate the derrivatives */
-    VPRINT(" Starting derrivative x, y\r\n");
-    derrivative_x_y(smoothedim, canny_edge_rows, canny_edge_cols, &delta_x, &delta_y);
+    /* Calculate the derivatives */
+    VPRINT(" Starting derivative x, y\r\n");
+#if DERIVATIVE_DSP
+    canny_edge_Derivative(smoothedim, canny_edge_rows, canny_edge_cols, delta_x, delta_y, processorId);
+#else
+    derivative_x_y(smoothedim, canny_edge_rows, canny_edge_cols, &delta_x, &delta_y);
+#endif
 
     /* Compute the magnitude */
     VPRINT(" Starting magnitude x, y\r\n");
+#if MAGNITUDE_DSP
+    canny_edge_Magnitude(delta_x, delta_y, canny_edge_rows, canny_edge_cols, magnitude, processorId);
+#else
     magnitude_x_y(delta_x, delta_y, canny_edge_rows, canny_edge_cols, magnitude);
+#endif
 
     /* Do the Non maximal suppression */
     VPRINT(" Starting non maximal suppression \r\n");
@@ -412,6 +435,15 @@ NORMAL_API DSP_STATUS canny_edge_Execute (Uint8 processorId, IN Char8 * strImage
         fprintf(stderr, "Error writing the edge image, %s.\n", outfilename);
         status = DSP_EFAIL;
     }
+
+    /* Free buffers */
+    free(magnitude);
+    free(nms);
+    free(edge);
+#if VERIFY
+    free(kernel);
+#endif
+
 
     return status;
 }
@@ -449,6 +481,7 @@ NORMAL_API Void canny_edge_Delete (Uint8 processorId)
 
     /* Free the canny edge image */
     free(canny_edge_image);
+    //free(gaussian_kernel);
 
     /*
      *  Stop execution on DSP.
@@ -568,244 +601,200 @@ STATIC Void canny_edge_Notify (Uint32 eventNo, Pvoid arg, Pvoid info)
         sem_post(&sem);
     } else if((int)info == canny_edge_WRITEBACK) {
         sem_post(&sem);
+    } else if((int)info == canny_edge_DERIVATIVE) {
+        sem_post(&sem);
+    } else if((int)info == canny_edge_MAGNITUDE) {
+        sem_post(&sem);
     }
 }
 
-/*******************************************************************************
-* FUNCTION: angle_radians
-* PURPOSE: This procedure computes the angle of a vector with components x and
-* y. It returns this angle in radians with the answer being in the range
-* 0 <= angle <2*PI.
-*******************************************************************************/
-STATIC double angle_radians(double x, double y)
+//////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////// DSP ////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////////
+
+/* Simple function which transmits the image and expects it back with each pixel +1 */
+STATIC Void canny_edge_Writeback(unsigned char *image, int rows, int cols, Uint8 processorId)
 {
-    double xu, yu, ang;
+#if VERIFY
+    int i, status;
+#endif
 
-    xu = fabs(x);
-    yu = fabs(y);
+    /* Send the image */
+    POOL_writeback (POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                    image,
+                    sizeof(unsigned char) * rows * cols);
+    NOTIFY_notify (processorId, canny_edge_IPS_ID, canny_edge_IPS_EVENTNO, canny_edge_WRITEBACK);
+    VPRINT("  Writeback send, waiting for response...\r\n");
 
-    if((xu == 0) && (yu == 0)) return(0);
+    /* Wait for the response */
+    sem_wait(&sem);
 
-    ang = atan(yu/xu);
+    /* Invalidate the result */
+    POOL_invalidate(POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                    image,
+                    sizeof(unsigned char) * rows * cols);
 
-    if(x >= 0)
-    {
-        if(y >= 0) return(ang);
-        else return(2*M_PI - ang);
-    }
-    else
-    {
-        if(y >= 0) return(M_PI - ang);
-        else return(M_PI + ang);
-    }
-}
-
-/*******************************************************************************
-* PROCEDURE: magnitude_x_y
-* PURPOSE: Compute the magnitude of the gradient. This is the square root of
-* the sum of the squared derivative values.
-* NAME: Mike Heath
-* DATE: 2/15/96
-*******************************************************************************/
-STATIC void magnitude_x_y(short int *delta_x, short int *delta_y, int rows, int cols,
-                   short int *magnitude)
-{
-    int r, c, pos, sq1, sq2;
-
-    for(r=0,pos=0; r<rows; r++)
-    {
-        for(c=0; c<cols; c++,pos++)
-        {
-            sq1 = (int)delta_x[pos] * (int)delta_x[pos];
-            sq2 = (int)delta_y[pos] * (int)delta_y[pos];
-            magnitude[pos] = (short)(0.5 + sqrt((float)sq1 + (float)sq2));
-        }
-    }
-}
-
-
-/*******************************************************************************
-* PROCEDURE: derrivative_x_y
-* PURPOSE: Compute the first derivative of the image in both the x any y
-* directions. The differential filters that are used are:
-*
-*                                          -1
-*         dx =  -1 0 +1     and       dy =  0
-*                                          +1
-*
-* NAME: Mike Heath
-* DATE: 2/15/96
-*******************************************************************************/
-STATIC void derrivative_x_y(short int *smoothedim, int rows, int cols,
-        short int **delta_x, short int **delta_y)
-{
-   int r, c, pos;
-   // Calculate the X direction
-   for(r=0;r<rows;r++){
-      pos = r * cols;
-      (*delta_x)[pos] = smoothedim[pos+1] - smoothedim[pos];
-      pos++;
-      for(c=1;c<(cols-1);c++,pos++){
-         (*delta_x)[pos] = smoothedim[pos+1] - smoothedim[pos-1];
-      }
-      (*delta_x)[pos] = smoothedim[pos] - smoothedim[pos-1];
-   }
-
-   // Calculate the Y direction
-   for(c=0;c<cols;c++){
-      pos = c;
-      (*delta_y)[pos] = smoothedim[pos+cols] - smoothedim[pos];
-      pos += cols;
-      for(r=1;r<(rows-1);r++,pos+=cols){
-         (*delta_y)[pos] = smoothedim[pos+cols] - smoothedim[pos-cols];
-      }
-      (*delta_y)[pos] = smoothedim[pos] - smoothedim[pos-cols];
-   }
-}
-
-/*******************************************************************************
-* PROCEDURE: gaussian_smooth
-* PURPOSE: Blur an image with a gaussian filter.
-* NAME: Mike Heath
-* DATE: 2/15/96
-*******************************************************************************/
-STATIC void gaussian_smooth(unsigned char *image, short int* smoothedim, int rows, int cols, float sigma)
-{
-    int r, c, rr, cc,     /* Counter variables. */
-        windowsize,        /* Dimension of the gaussian kernel. */
-        center;            /* Half of the windowsize. */
-    float *tempim,        /* Buffer for separable filter gaussian smoothing. */
-          *kernel,        /* A one dimensional gaussian kernel. */
-          dot,            /* Dot product summing variable. */
-          sum;            /* Sum of the kernel weights variable. */
-
-    /****************************************************************************
-    * Create a 1-dimensional gaussian smoothing kernel.
-    ****************************************************************************/
-    VPRINT("   Computing the gaussian smoothing kernel.\n");
-    make_gaussian_kernel(sigma, &kernel, &windowsize);
-    center = windowsize / 2;
-
-
-    /****************************************************************************
-    * Allocate a temporary buffer image
-    ****************************************************************************/
-    if((tempim = (float *) malloc(rows*cols* sizeof(float))) == NULL)
-    {
-        fprintf(stderr, "Error allocating the buffer image.\n");
-        exit(1);
-    }
-
-    /****************************************************************************
-    * Blur in the x - direction.
-    ****************************************************************************/
-    VPRINT("   Bluring the image in the X-direction.\n");
-    for(r=0; r<rows; r++)
-    {
-        for(c=0; c<cols; c++)
-        {
-            dot = 0.0;
-            sum = 0.0;
-            for(cc=(-center); cc<=center; cc++)
-            {
-                if(((c+cc) >= 0) && ((c+cc) < cols))
-                {
-                    dot += (float)image[r*cols+(c+cc)] * kernel[center+cc];
-                    sum += kernel[center+cc];
-                }
-            }
-            tempim[r*cols+c] = dot/sum;
+    /* Check if the result is correct */
+#if VERIFY
+    status = DSP_SOK;
+    for(i = 0; i < (rows * cols); i++) {
+        canny_edge_image[i]++;
+        if(image[i] != canny_edge_image[i]) {
+            fprintf(stderr, "Got incorrect image back! Expected %d, Got %d (i: %d)\r\n", canny_edge_image[i], image[i], i);
+            status = DSP_EFAIL;
         }
     }
 
-    /****************************************************************************
-    * Blur in the y - direction.
-    ****************************************************************************/
-    VPRINT("   Bluring the image in the Y-direction.\n");
-    for(c=0; c<cols; c++)
-    {
-        for(r=0; r<rows; r++)
-        {
-            sum = 0.0;
-            dot = 0.0;
-            for(rr=(-center); rr<=center; rr++)
-            {
-                if(((r+rr) >= 0) && ((r+rr) < rows))
-                {
-                    dot += tempim[(r+rr)*cols+c] * kernel[center+rr];
-                    sum += kernel[center+rr];
-                }
-            }
-            smoothedim[r*cols+c] = (short int)(dot*BOOSTBLURFACTOR/sum + 0.5);
+    if(DSP_SUCCEEDED(status))
+        VPRINT("Writeback was succesfull!\r\n");
+#endif
+}
+
+STATIC Void canny_edge_Derivative(short int *smoothedim, int rows, int cols, short int *delta_x, short int *delta_y, Uint8 processorId)
+{
+#if VERIFY
+    int i;
+    int status = DSP_SOK;
+    short int *verify_delta_x = (short int *) malloc(sizeof(short int) * rows * cols);
+    short int *verify_delta_y = (short int *) malloc(sizeof(short int) * rows * cols);
+#endif
+
+    /* Send smoothedim */
+    POOL_writeback (POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                    smoothedim,
+                    buffer_sizes[1]);
+
+    /* Notify DSP */
+    NOTIFY_notify (processorId, canny_edge_IPS_ID, canny_edge_IPS_EVENTNO, canny_edge_DERIVATIVE);
+    VPRINT("  DSP_derivative_x_y send, waiting for response...\r\n");
+
+     /* Wait for the response */
+    sem_wait(&sem);
+
+    /* Invalidate the result */
+    POOL_invalidate(POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                    delta_x,
+                    buffer_sizes[2]);
+    POOL_invalidate(POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                    delta_y,
+                    buffer_sizes[3]);
+
+#if VERIFY
+    /* verify with GPP function */
+    derivative_x_y(smoothedim, rows, cols, &verify_delta_x, &verify_delta_y);
+  
+    /* Check for delta_x*/
+    for(i = 0; i < rows*cols; i++) {
+        if(delta_x[i] != verify_delta_x[i]) {
+            fprintf(stderr, "Got incorrect delta_x result back! Expected %d, Got %d (i: %d)\r\n", verify_delta_x[i], delta_x[i], i);
+            status = DSP_EFAIL;
         }
     }
 
-    free(tempim);
-    free(kernel);
+    /* Check for delta_y*/
+    for(i = 0; i < rows*cols; i++) {
+        if(delta_y[i] != verify_delta_y[i]) {
+            fprintf(stderr, "Got incorrect delta_y result back! Expected %d, Got %d (i: %d)\r\n", verify_delta_y[i], delta_y[i], i);
+            status = DSP_EFAIL;
+        }
+    }
+
+    /* Print if verify was succesfull */
+    if(DSP_SUCCEEDED(status)) {
+        VPRINT("Execution of canny_edge_Derivative was succesfull!\r\n");
+    }
+    else {
+        fprintf(stderr, "Execution of canny_edge_Derivative was FAILED!\r\n");
+    }
+
+    free(verify_delta_x);
+    free(verify_delta_y);
+#endif
 }
 
-/*******************************************************************************
-* PROCEDURE: make_gaussian_kernel
-* PURPOSE: Create a one dimensional gaussian kernel.
-* NAME: Mike Heath
-* DATE: 2/15/96
-*******************************************************************************/
-STATIC void make_gaussian_kernel(float sigma, float **kernel, int *windowsize)
+STATIC Void canny_edge_Magnitude(short int *delta_x, short int *delta_y, int rows, int cols, short int *magnitude, Uint8 processorId)
 {
-    int i, center;
-    float x, fx, sum=0.0;
+    int i;
+    int *magnitude_square = (int *)buffers[4][0];
+#if VERIFY
+    int status = DSP_SOK;
+    short int *gpp_magnitude = (short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
+#endif
 
-    *windowsize = 1 + 2 * ceil(2.5 * sigma);
-    center = (*windowsize) / 2;
+    /* Send the input data */
+    /* Send delta_x */
+    POOL_writeback (POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                    delta_x,
+                    buffer_sizes[2]);
+    /* Send delta_y */
+    POOL_writeback (POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                    delta_y,
+                    buffer_sizes[3]);
 
-    if((*kernel = (float *) malloc((*windowsize)* sizeof(float))) == NULL)
+
+    NOTIFY_notify (processorId, canny_edge_IPS_ID, canny_edge_IPS_EVENTNO, canny_edge_MAGNITUDE);
+    VPRINT("  canny_edge_Magnitude send, waiting for response...\r\n");
+
+    /* Wait for the response */
+    sem_wait(&sem);
+
+    /* Invalidate the result */
+    POOL_invalidate(POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                    magnitude,
+                    buffer_sizes[4]);
+
+    /* Do sqrt on GPP */
+    for(i=0; i < rows*cols; i++)
     {
-        fprintf(stderr, "Error callocing the gaussian kernel array.\n");
-        exit(1);
+        magnitude[i] = (short)(0.5 + sqrt((float)magnitude_square[i]));
     }
 
-    for(i=0; i<(*windowsize); i++)
-    {
-        x = (float)(i - center);
-        fx = pow(2.71828, -0.5*x*x/(sigma*sigma)) / (sigma * sqrt(6.2831853));
-        (*kernel)[i] = fx;
-        sum += fx;
+#if VERIFY
+    /* Verify magnitude using the GPP code */
+    magnitude_x_y(delta_x, delta_y, canny_edge_rows, canny_edge_cols, gpp_magnitude);
+
+    /* Check if it matches */
+    for(i = 0; i < rows*cols; i++) {
+        if(magnitude[i] != gpp_magnitude[i]) {
+            fprintf(stderr, "Got incorrect magnitude result back! Expected %d, Got %d (i: %d)\r\n", gpp_magnitude[i], magnitude[i], i);
+            status = DSP_EFAIL;
+        }
     }
 
-    for(i=0; i<(*windowsize); i++) (*kernel)[i] /= sum;
-
-    if(VERBOSE)
-    {
-        printf("The filter coefficients are:\n");
-        for(i=0; i<(*windowsize); i++)
-            printf("kernel[%d] = %f\n", i, (*kernel)[i]);
+    if(DSP_SUCCEEDED(status)) {
+        VPRINT("Execution of canny_edge_Magnitude was succesfull!\r\n");
     }
+    else {
+        fprintf(stderr, "Execution of canny_edge_Magnitude FAILED!\r\n");
+    }
+    free(gpp_magnitude);
+#endif
 }
+
+//////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////// NEON ////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////////
 
 /* Guassian smooth on Neon */
-STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, int rows, int cols, float sigma)
+STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Uint16 rows, Uint16 cols)
 {
-    int windowsize;          
-    float *tempim,        
-          *kernel;            
+#if VERIFY
+    short int *verify_smoothedim=(short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
+#endif
+
+    float *tempim;           
     float *rows_image;                     /* Image for x-smoothing*/
     float *cols_image;                    /*  Image for y-smoothing*/
     float neon_kernel[17];               /* New kernel for neon */
     unsigned int neon_cols=cols+16;     /* Cols value for x-direction*/
     unsigned int neon_rows=rows+16;     /* Rows value for y-direction*/
-    unsigned int i, k, a, c, r, j,t,b; /*Loop variant*/
+    unsigned int i, k, a, c, r, j, b; /*Loop variant*/
     float32x4_t neon_pixel;       /* Four consecutive pixel values */
     float32x4_t neon_factor;      /* Four consecutive filter values */
     float32x4_t temp_dot;         /* The neon multiplication result store here */
     float dot= 0.0f;              /* The sum of pixel values */
     float Referkernel = 0.0f;      /* Intermediate sum of filter values considering boundary situation */
     float sum = 0.0f;             /* The sum of filter values */
-    
-    /****************************************************************************
-    * Create a 1-dimensional gaussian smoothing kernel.
-    ****************************************************************************/
-    VPRINT("   Computing the gaussian smoothing kernel.\n");
-    make_gaussian_kernel(sigma, &kernel, &windowsize);
 
     /****************************************************************************
     * Allocate a temporary buffer image and the smoothed image.
@@ -823,7 +812,7 @@ STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, in
     for (b = 0 ; b <= 16 ; b++)
     {
         if(b > 0 && b < 16 )
-            neon_kernel[b] = kernel [b-1];
+            neon_kernel[b] = gaussian_kernel [b-1];
         else
             neon_kernel [b] = 0;    
     }
@@ -869,14 +858,14 @@ STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, in
                 }
                 neon_pixel = vld1q_f32((float32_t const *)&rows_image[r*neon_cols+c+j*4+e]);
                 neon_factor = vld1q_f32((float32_t const *)&neon_kernel[j*4+e]);
-                temp_dot = vmlaq_f32(temp_dot,neon_pixel,neon_factor);
+                temp_dot = vmlaq_f32(temp_dot, neon_pixel, neon_factor);
             }
             
     
-            for( t=0; t<=3; t++){   
-                        
-                dot += vgetq_lane_f32(temp_dot,t ); 
-            }
+            dot += vgetq_lane_f32(temp_dot, 0);
+            dot += vgetq_lane_f32(temp_dot, 1);
+            dot += vgetq_lane_f32(temp_dot, 2);
+            dot += vgetq_lane_f32(temp_dot, 3);
             dot += rows_image[r*neon_cols+c+8] * neon_kernel[8];
             tempim[r*cols+c] = dot/sum;
             dot=0; 
@@ -926,18 +915,245 @@ STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, in
             }
             
         
-            for( t=0; t<=3; t++){              
-                dot += vgetq_lane_f32(temp_dot,t ); 
-            }
+            dot += vgetq_lane_f32(temp_dot, 0);
+            dot += vgetq_lane_f32(temp_dot, 1);
+            dot += vgetq_lane_f32(temp_dot, 2);
+            dot += vgetq_lane_f32(temp_dot, 3);
             dot += cols_image[c*neon_rows+r+8] * neon_kernel[8];
-            smoothedim[r*cols+c] = (unsigned short int )(dot*BOOSTBLURFACTOR/sum + 0.5);
+            smoothedim[r*cols+c] = (short int )(dot*BOOSTBLURFACTOR/sum + 0.5);
             dot=0; 
         }
     }
     free(rows_image);
     free(cols_image);
     free(tempim);
-    free(kernel);
+
+#if VERIFY
+    /* Verify guassian smooth neon using the GPP code */
+    gaussian_smooth(image, verify_smoothedim, canny_edge_rows, canny_edge_cols);
+
+    /* Check if it matches */
+    for(i = 0; i < rows*cols; i++) {
+        if(smoothedim[i] != verify_smoothedim[i]) {
+            fprintf(stderr, "Got incorrect guassian smooth result back! Expected %d, Got %d (i: %d)\r\n", verify_smoothedim[i], smoothedim[i], i);
+        }
+    }
+
+    
+    fprintf(stderr, "Execution of guassian_smooth_neon was successful\r\n");
+    
+    free(verify_smoothedim);
+#endif
+
+
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////// GPP ////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////////
+
+/*******************************************************************************
+* FUNCTION: angle_radians
+* PURPOSE: This procedure computes the angle of a vector with components x and
+* y. It returns this angle in radians with the answer being in the range
+* 0 <= angle <2*PI.
+*******************************************************************************/
+STATIC double angle_radians(double x, double y)
+{
+    double xu, yu, ang;
+
+    xu = fabs(x);
+    yu = fabs(y);
+
+    if((xu == 0) && (yu == 0)) return(0);
+
+    ang = atan(yu/xu);
+
+    if(x >= 0)
+    {
+        if(y >= 0) return(ang);
+        else return(2*M_PI - ang);
+    }
+    else
+    {
+        if(y >= 0) return(M_PI - ang);
+        else return(M_PI + ang);
+    }
+}
+
+/*******************************************************************************
+* PROCEDURE: magnitude_x_y
+* PURPOSE: Compute the magnitude of the gradient. This is the square root of
+* the sum of the squared derivative values.
+* NAME: Mike Heath
+* DATE: 2/15/96
+*******************************************************************************/
+STATIC void magnitude_x_y(short int *delta_x, short int *delta_y, int rows, int cols,
+                   short int *magnitude)
+{
+    int r, c, pos, sq1, sq2;
+
+    for(r=0,pos=0; r<rows; r++)
+    {
+        for(c=0; c<cols; c++,pos++)
+        {
+            sq1 = (int)delta_x[pos] * (int)delta_x[pos];
+            sq2 = (int)delta_y[pos] * (int)delta_y[pos];
+            magnitude[pos] = (short)(0.5 + sqrt((float)sq1 + (float)sq2));
+            // VPRINT(" Magnitude GPP: %d \r \n", magnitude[pos]);
+        }
+    }
+}
+
+
+/*******************************************************************************
+* PROCEDURE: derivative_x_y
+* PURPOSE: Compute the first derivative of the image in both the x any y
+* directions. The differential filters that are used are:
+*
+*                                          -1
+*         dx =  -1 0 +1     and       dy =  0
+*                                          +1
+*
+* NAME: Mike Heath
+* DATE: 2/15/96
+*******************************************************************************/
+STATIC void derivative_x_y(short int *smoothedim, int rows, int cols,
+        short int **delta_x, short int **delta_y)
+{
+   int r, c, pos;
+   // Calculate the X direction
+   for(r=0;r<rows;r++){
+      pos = r * cols;
+      (*delta_x)[pos] = smoothedim[pos+1] - smoothedim[pos];
+      pos++;
+      for(c=1;c<(cols-1);c++,pos++){
+         (*delta_x)[pos] = smoothedim[pos+1] - smoothedim[pos-1];
+      }
+      (*delta_x)[pos] = smoothedim[pos] - smoothedim[pos-1];
+   }
+
+   // Calculate the Y direction
+   for(c=0;c<cols;c++){
+      pos = c;
+      (*delta_y)[pos] = smoothedim[pos+cols] - smoothedim[pos];
+      pos += cols;
+      for(r=1;r<(rows-1);r++,pos+=cols){
+         (*delta_y)[pos] = smoothedim[pos+cols] - smoothedim[pos-cols];
+      }
+      (*delta_y)[pos] = smoothedim[pos] - smoothedim[pos-cols];
+   }
+}
+
+/*******************************************************************************
+* PROCEDURE: gaussian_smooth
+* PURPOSE: Blur an image with a gaussian filter.
+* NAME: Mike Heath
+* DATE: 2/15/96
+*******************************************************************************/
+STATIC void gaussian_smooth(unsigned char *image, short int* smoothedim, int rows, int cols)
+{
+    int r, c, rr, cc,     /* Counter variables. */
+        center;            /* Half of the windowsize. */
+    float *tempim,        /* Buffer for separable filter gaussian smoothing. */
+          dot,            /* Dot product summing variable. */
+          sum;            /* Sum of the kernel weights variable. */
+    
+    center = windowsize_kernel / 2;
+
+
+    /****************************************************************************
+    * Allocate a temporary buffer image
+    ****************************************************************************/
+    if((tempim = (float *) malloc(rows*cols* sizeof(float))) == NULL)
+    {
+        fprintf(stderr, "Error allocating the buffer image.\n");
+        exit(1);
+    }
+
+    /****************************************************************************
+    * Blur in the x - direction.
+    ****************************************************************************/
+    VPRINT("   Bluring the image in the X-direction.\n");
+    for(r=0; r<rows; r++)
+    {
+        for(c=0; c<cols; c++)
+        {
+            dot = 0.0;
+            sum = 0.0;
+            for(cc=(-center); cc<=center; cc++)
+            {
+                if(((c+cc) >= 0) && ((c+cc) < cols))
+                {
+                    dot += (float)image[r*cols+(c+cc)] * gaussian_kernel[center+cc];
+                    sum += gaussian_kernel[center+cc];
+                }
+            }
+            tempim[r*cols+c] = dot/sum;
+        }
+    }
+
+    /****************************************************************************
+    * Blur in the y - direction.
+    ****************************************************************************/
+    VPRINT("   Bluring the image in the Y-direction.\n");
+    for(c=0; c<cols; c++)
+    {
+        for(r=0; r<rows; r++)
+        {
+            sum = 0.0;
+            dot = 0.0;
+            for(rr=(-center); rr<=center; rr++)
+            {
+                if(((r+rr) >= 0) && ((r+rr) < rows))
+                {
+                    dot += tempim[(r+rr)*cols+c] * gaussian_kernel[center+rr];
+                    sum += gaussian_kernel[center+rr];
+                }
+            }
+            smoothedim[r*cols+c] = (short int)(dot*BOOSTBLURFACTOR/sum + 0.5);
+        }
+    }
+
+    free(tempim);
+}
+
+/*******************************************************************************
+* PROCEDURE: make_gaussian_kernel
+* PURPOSE: Create a one dimensional gaussian kernel.
+* NAME: Mike Heath
+* DATE: 2/15/96
+*******************************************************************************/
+STATIC void make_gaussian_kernel(float sigma, float **kernel, int *windowsize)
+{
+    int i, center;
+    float x, fx, sum=0.0;
+
+    *windowsize = 1 + 2 * ceil(2.5 * sigma);
+    center = (*windowsize) / 2;
+
+    if((*kernel = (float *) malloc((*windowsize)* sizeof(float))) == NULL)
+    {
+        fprintf(stderr, "Error callocing the gaussian kernel array.\n");
+        exit(1);
+    }
+
+    for(i=0; i<(*windowsize); i++)
+    {
+        x = (float)(i - center);
+        fx = pow(2.71828, -0.5*x*x/(sigma*sigma)) / (sigma * sqrt(6.2831853));
+        (*kernel)[i] = fx;
+        sum += fx;
+    }
+
+    for(i=0; i<(*windowsize); i++) (*kernel)[i] /= sum;
+
+    if(VERBOSE)
+    {
+        printf("The computed filter coefficients are:\n");
+        for(i=0; i<(*windowsize); i++)
+            printf("kernel[%d] = %f\n", i, (*kernel)[i]);
+    }
 }
 
 

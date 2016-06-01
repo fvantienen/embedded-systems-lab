@@ -8,3 +8,4 @@ communication.pdf
 gprof.txt
 pin.log
 matrix.eps
+./*.pgm
