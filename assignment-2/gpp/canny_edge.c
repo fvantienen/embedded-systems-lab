@@ -31,7 +31,8 @@ extern "C" {
 /* Enable / Disable DSP/NEON */
 #define GAUSSIAN_DSP 1
 #define GUASSIAN_NEON 1
-#define DERIVATIVE_DSP 1
+#define DERIVATIVE_DSP 0
+#define DERIVATIVE_NEON 1
 #define MAGNITUDE_DSP 0
 #define MAGNITUDE_NEON 1
 
@@ -110,6 +111,7 @@ STATIC Void canny_edge_Magnitude(short int *delta_x, short int *delta_y, int row
 
 /* Used neon functions */
 STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Uint16 rows, Uint16 cols);
+STATIC void derivative_x_y_neon(short int *smoothedim, int rows, int cols, short int **delta_x, short int **delta_y);
 STATIC void magnitude_x_y_neon(short int *delta_x, short int *delta_y, int rows, int cols, short int *magnitude);
 STATIC void magnitude_x_y_sq_neon(short int *delta_x, short int *delta_y, int rows, int cols, int *magnitude_square);
 STATIC void magnitude_x_y_rt(int rows, int cols, int *magnitude_square, short int *magnitude);
@@ -411,6 +413,8 @@ NORMAL_API DSP_STATUS canny_edge_Execute (Uint8 processorId, IN Char8 * strImage
     VPRINT(" Starting derivative x, y\r\n");
 #if DERIVATIVE_DSP
     canny_edge_Derivative(smoothedim, canny_edge_rows, canny_edge_cols, delta_x, delta_y, processorId);
+#elif DERIVATIVE_NEON
+    derivative_x_y_neon(smoothedim, canny_edge_rows, canny_edge_cols, &delta_x, &delta_y);
 #else
     derivative_x_y(smoothedim, canny_edge_rows, canny_edge_cols, &delta_x, &delta_y);
 #endif
@@ -1002,12 +1006,61 @@ STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Ui
 
 }
 
+STATIC void derivative_x_y_neon(short int *smoothedim, int rows, int cols, short int **delta_x, short int **delta_y)
+{
+   int r, c, pos;
+   /****************************************************************************
+   * Allocate images to store the derivatives.
+   ****************************************************************************/
+   if(((*delta_x) = (short *) malloc(rows*cols* sizeof(short))) == NULL){
+      fprintf(stderr, "Error allocating the delta_x image.\n");
+      exit(1);
+   }
+   if(((*delta_y) = (short *) malloc(rows*cols* sizeof(short))) == NULL){
+      fprintf(stderr, "Error allocating the delta_y image.\n");
+      exit(1);
+   }
+
+   for(r=0;r<rows;r++){
+      pos = r * cols;
+      (*delta_x)[pos] = smoothedim[pos+1] - smoothedim[pos];
+      pos++;
+      for(c=1;c<(cols-1);c++,pos++){
+         (*delta_x)[pos] = smoothedim[pos+1] - smoothedim[pos-1];
+      }
+      (*delta_x)[pos] = smoothedim[pos] - smoothedim[pos-1];
+   }  
+
+   	printf("Computing the derivative using Neon.\n");
+    for(c=0;c<cols;c+=4){
+   	int16x4_t vector_smoothedim_3, vector_smoothedim_4, vector_delta_y;
+   	pos = c;
+	vector_smoothedim_3 = vld1_s16(&(smoothedim[pos+cols]));
+   	vector_smoothedim_4 = vld1_s16(&(smoothedim[pos]));
+   	vector_delta_y = vsub_s16(vector_smoothedim_3, vector_smoothedim_4);
+   	vst1_s16(&((*delta_y)[pos]), vector_delta_y);
+	pos += cols;
+	for(r=1;r<(rows-1);r++,pos+=cols){ 	
+   	vector_smoothedim_3 = vld1_s16(&(smoothedim[pos+cols]));
+   	vector_smoothedim_4 = vld1_s16(&(smoothedim[pos-cols]));
+   	vector_delta_y = vsub_s16(vector_smoothedim_3, vector_smoothedim_4);
+   	vst1_s16(&((*delta_y)[pos]), vector_delta_y);
+   }
+	vector_smoothedim_3 = vld1_s16(&(smoothedim[pos]));
+   	vector_smoothedim_4 = vld1_s16(&(smoothedim[pos-cols]));
+   	vector_delta_y = vsub_s16(vector_smoothedim_3, vector_smoothedim_4);
+   	vst1_s16(&((*delta_y)[pos]), vector_delta_y);
+   }  
+}
+
 STATIC void magnitude_x_y_neon(short int *delta_x, short int *delta_y, int rows, int cols, short int *magnitude)
 {
 #if VERIFY
 	int i; // for counting
+	int magnitude_neon_fail = 0; // flag for failure
     short int *verify_magnitude=(short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
 #endif
+
 	int *magnitude_square = (int *)malloc(sizeof(int) * rows * cols);
 	magnitude_x_y_sq_neon(delta_x, delta_y, rows, cols, magnitude_square);
 	magnitude_x_y_rt(rows, cols, magnitude_square, magnitude);
@@ -1021,11 +1074,17 @@ STATIC void magnitude_x_y_neon(short int *delta_x, short int *delta_y, int rows,
     for(i = 0; i < rows*cols; i++) {
         if(magnitude[i] != verify_magnitude[i]) {
             fprintf(stderr, "Got incorrect magnitude result back! Expected %d, Got %d (i: %d)\r\n", verify_magnitude[i], magnitude[i], i);
+            magnitude_neon_fail = 1;
         }
     }
  
-    fprintf(stderr, "Execution of magnitude_x_y_neon was successful\r\n");
-    
+    if(magnitude_neon_fail) {
+        VPRINT("Execution of magnitude_x_y_neon FAILED!\r\n");
+    }
+    else {
+        fprintf(stderr, "Execution of magnitude_x_y_neon was successful!\r\n");
+    }
+
     free(verify_magnitude);
 #endif
 }
