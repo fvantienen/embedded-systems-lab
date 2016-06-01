@@ -1004,10 +1004,30 @@ STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Ui
 
 STATIC void magnitude_x_y_neon(short int *delta_x, short int *delta_y, int rows, int cols, short int *magnitude)
 {
+#if VERIFY
+	int i; // for counting
+    short int *verify_magnitude=(short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
+#endif
 	int *magnitude_square = (int *)malloc(sizeof(int) * rows * cols);
 	magnitude_x_y_sq_neon(delta_x, delta_y, rows, cols, magnitude_square);
 	magnitude_x_y_rt(rows, cols, magnitude_square, magnitude);
 	free(magnitude_square);
+
+#if VERIFY
+    /* Verify magnitude_x_y_neon using the GPP code */
+    magnitude_x_y(delta_x, delta_y, rows, cols, verify_magnitude);
+
+    /* Check if it matches */
+    for(i = 0; i < rows*cols; i++) {
+        if(magnitude[i] != verify_magnitude[i]) {
+            fprintf(stderr, "Got incorrect magnitude result back! Expected %d, Got %d (i: %d)\r\n", verify_magnitude[i], magnitude[i], i);
+        }
+    }
+ 
+    fprintf(stderr, "Execution of magnitude_x_y_neon was successful\r\n");
+    
+    free(verify_magnitude);
+#endif
 }
 
 STATIC void magnitude_x_y_sq_neon(short int *delta_x, short int *delta_y, int rows, int cols, int *magnitude_square)
