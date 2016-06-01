@@ -32,7 +32,8 @@ extern "C" {
 #define GAUSSIAN_DSP 1
 #define GUASSIAN_NEON 1
 #define DERIVATIVE_DSP 1
-#define MAGNITUDE_DSP 1
+#define MAGNITUDE_DSP 0
+#define MAGNITUDE_NEON 1
 
 /* Enable verbose printing by default */
 #ifndef VERBOSE
@@ -109,6 +110,9 @@ STATIC Void canny_edge_Magnitude(short int *delta_x, short int *delta_y, int row
 
 /* Used neon functions */
 STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Uint16 rows, Uint16 cols);
+STATIC void magnitude_x_y_neon(short int *delta_x, short int *delta_y, int rows, int cols, short int *magnitude);
+STATIC void magnitude_x_y_sq_neon(short int *delta_x, short int *delta_y, int rows, int cols, int *magnitude_square);
+STATIC void magnitude_x_y_rt(int rows, int cols, int *magnitude_square, short int *magnitude);
 
 /* Used GPP functions */
 STATIC void gaussian_smooth(unsigned char *image, short int* smoothedim, int rows, int cols);
@@ -398,7 +402,7 @@ NORMAL_API DSP_STATUS canny_edge_Execute (Uint8 processorId, IN Char8 * strImage
 #if GAUSSIAN_DSP
     canny_edge_Gaussian(image, canny_edge_rows, canny_edge_cols, smoothedim, processorId);
 #elif GUASSIAN_NEON
-    gaussian_smooth_neon(image, smoothedim, canny_edge_rows, canny_edge_cols, SIGMA);
+    gaussian_smooth_neon(image, smoothedim, canny_edge_rows, canny_edge_cols);
 #else
     gaussian_smooth(image, smoothedim, canny_edge_rows, canny_edge_cols);
 #endif
@@ -415,6 +419,8 @@ NORMAL_API DSP_STATUS canny_edge_Execute (Uint8 processorId, IN Char8 * strImage
     VPRINT(" Starting magnitude x, y\r\n");
 #if MAGNITUDE_DSP
     canny_edge_Magnitude(delta_x, delta_y, canny_edge_rows, canny_edge_cols, magnitude, processorId);
+#elif MAGNITUDE_NEON
+    magnitude_x_y_neon(delta_x, delta_y, canny_edge_rows, canny_edge_cols, magnitude);
 #else
     magnitude_x_y(delta_x, delta_y, canny_edge_rows, canny_edge_cols, magnitude);
 #endif
@@ -988,14 +994,53 @@ STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Ui
             fprintf(stderr, "Got incorrect guassian smooth result back! Expected %d, Got %d (i: %d)\r\n", verify_smoothedim[i], smoothedim[i], i);
         }
     }
-
-    
+ 
     fprintf(stderr, "Execution of guassian_smooth_neon was successful\r\n");
     
     free(verify_smoothedim);
 #endif
 
+}
 
+STATIC void magnitude_x_y_neon(short int *delta_x, short int *delta_y, int rows, int cols, short int *magnitude)
+{
+	int *magnitude_square = (int *)malloc(sizeof(int) * rows * cols);
+	magnitude_x_y_sq_neon(delta_x, delta_y, rows, cols, magnitude_square);
+	magnitude_x_y_rt(rows, cols, magnitude_square, magnitude);
+	free(magnitude_square);
+}
+
+STATIC void magnitude_x_y_sq_neon(short int *delta_x, short int *delta_y, int rows, int cols, int *magnitude_square)
+{
+    int r, c, pos;
+    printf("Computing the squared magnitude using Neon.\n");
+    for(r=0,pos=0; r<rows; r++)
+    {
+        for(c=0; c<cols; c+=4)
+        {
+            int16x4_t vector_delta_x, vector_delta_y;
+            int32x4_t vector_delta_x_sq, vector_delta_y_sq, vector_magnitude_square;
+            vector_delta_x = vld1_s16(&(delta_x[pos]));
+            vector_delta_y = vld1_s16(&(delta_y[pos]));
+            vector_delta_x_sq = vmull_s16(vector_delta_x, vector_delta_x);
+            vector_delta_y_sq = vmull_s16(vector_delta_y, vector_delta_y);
+            vector_magnitude_square = vaddq_s32(vector_delta_x_sq, vector_delta_y_sq);
+            vst1q_s32 (&magnitude_square[pos], vector_magnitude_square);
+            pos += 4;
+        }
+    }
+}
+
+STATIC void magnitude_x_y_rt(int rows, int cols, int *magnitude_square, short int *magnitude)
+{
+    int r, c, pos;
+    for(r=0,pos=0; r<rows; r++)
+    {
+        for(c=0; c<cols; c++,pos++)
+        {
+            magnitude[pos] = (short)(0.5 + sqrt((float)magnitude_square[pos]));
+        }
+    }
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////
