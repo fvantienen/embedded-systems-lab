@@ -30,6 +30,7 @@ enum {
     canny_edge_INIT,                    ///< Initialization stage
     canny_edge_DELETE,                  ///< Shutdown step
     canny_edge_WRITEBACK,               ///< Simple write back program
+    canny_edge_GAUSSIAN,                ///< Calculate the Gaussian
     canny_edge_DERIVATIVE,              ///< Calculate the derivatives
     canny_edge_MAGNITUDE                ///< Calculate the magnitude
 };
@@ -163,6 +164,87 @@ Int Task_delete (Task_TransferInfo * info)
     return status ;
 }
 
+Void Task_gaussian(Void)
+{
+  int r, c, rr, cc,     
+      windowsize,       /* Dimension of the gaussian kernel. */
+      center;           
+  unsigned int dot,     /* Dot product summing variable. */
+              sum,            /* Sum of the kernel weights variable. */
+              temp;
+
+ 
+  int rows = canny_edge_rows;
+  int cols = canny_edge_cols;
+  unsigned char *image = (unsigned char *)dsp_buffers[0][0];
+  short int *smoothedim = (short int *)dsp_buffers[1][0];
+  short int *tmpim = (short int *)dsp_buffers[2][0];
+
+  // unsigned char *tmpim;
+  // tmpim = (unsigned char *) malloc(rows*cols* sizeof(unsigned char));
+
+   /* A one dimensional gaussian kernel, normalized to fixed point. */
+    static unsigned short int kernel[] = {
+          416,  1177,  2837,  5830, 10206,
+        15226, 19356, 20969, 19356, 15226,
+        10206,  5830,  2837,  1177,  416
+    };
+ 
+  windowsize = 15;
+  center = windowsize / 2;
+
+
+  /* Invalidate cache */
+  BCACHE_inv (dsp_buffers[0][0], buffer_sizes[0], TRUE);
+
+    // Blur in x
+
+    for(r=0; r<rows; r++)
+    {
+        for(c=0; c<cols; c++)
+        {
+            dot = 0;
+            sum = 0;
+            for(cc=(-center); cc<=center; cc++)
+            {
+                if(((c+cc) >= 0) && ((c+cc) < cols))
+                {
+                    dot += image[r*cols+(c+cc)] * kernel[center+cc];
+                    sum += kernel[center+cc];
+                }
+            }
+            tmpim[r*cols+c] = dot/sum;
+        }
+    }
+
+    // Blur in y
+
+    for(c=0; c<cols; c++)
+    {
+        for(r=0; r<rows; r++)
+        {
+            sum = 0;
+            dot = 0;
+            for(rr=(-center); rr<=center; rr++)
+            {
+                if(((r+rr) >= 0) && ((r+rr) < rows))
+                {
+                    dot += tmpim[(r+rr)*cols+c] * kernel[center+rr];
+                    sum += kernel[center+rr];
+                }
+            }
+            temp = ((dot*90/sum));
+            smoothedim[r*cols+c] = temp;
+        }
+    }
+  /* Write back and invalidate */
+  BCACHE_wbInv(dsp_buffers[1][0], buffer_sizes[1], TRUE);
+
+
+  /* Notify the GPP that DSP is done */
+  NOTIFY_notify(ID_GPP, MPCSXFER_IPS_ID, MPCSXFER_IPS_EVENTNO, canny_edge_GAUSSIAN);
+}
+
 Void Task_derivative(Void)
 {
   Uint32 r, c, pos;
@@ -287,6 +369,9 @@ static Void Task_notify (Uint32 eventNo, Ptr arg, Ptr info)
       }
       else if((Uint32)info == canny_edge_WRITEBACK) {
         Task_writeback();
+      }
+      else if((Uint32)info == canny_edge_GAUSSIAN) {
+        Task_gaussian();
       }
       else if((Uint32)info == canny_edge_DERIVATIVE) {
         Task_derivative();
