@@ -30,9 +30,9 @@ extern "C" {
 
 /* Enable / Disable DSP/NEON */
 //#define GAUSSIAN_DSP 1
-#define GUASSIAN_NEON 1
-#define DERIVATIVE_DSP 1
-#define MAGNITUDE_DSP 1
+#define GAUSSIAN_NEON 1
+#define DERIVATIVE_DSP 0
+#define MAGNITUDE_DSP 0
 
 /* Enable verbose printing by default */
 #ifndef VERBOSE
@@ -74,6 +74,24 @@ Uint32 buffer_sizes[NUM_BUF_SIZES];                     ///< The buffer sizes
 Void *buffers[NUM_BUF_SIZES][NUM_BUF_MAX];              ///< The buffers
 Void *dsp_buffers[NUM_BUF_SIZES][NUM_BUF_MAX];          ///< Buffer addresses on the DSP
 
+/* Precomputed kernel values for the Gaussian smooth function */
+float gaussian_kernel[] = { 0.0031742106657475233078003,  /* kernel[0] */
+                            0.0089805237948894500732422,  /* kernel[1] */
+                            0.0216511301696300506591797,  /* kernel[2] */
+                            0.0444807782769203186035156,  /* kernel[3] */
+                            0.0778712481260299682617188,  /* kernel[4] */
+                            0.1161702200770378112792969,  /* kernel[5] */
+                            0.1476812809705734252929688,  /* kernel[6] */
+                            0.1599812060594558715820312,  /* kernel[7] */
+                            0.1476812809705734252929688,  /* kernel[8] */
+                            0.1161702200770378112792969,  /* kernel[9] */
+                            0.0778712481260299682617188,  /* kernel[10] */
+                            0.0444807782769203186035156,  /* kernel[11] */
+                            0.0216511301696300506591797,  /* kernel[12] */
+                            0.0089805237948894500732422,  /* kernel[13] */
+                            0.0031742106657475233078003}; /* kernel[14] */
+int windowsize_kernel = 15; /* Dimension of the gaussian kernel. */
+
 
 /* Specific canny edge variables */
 #define BOOSTBLURFACTOR 90.0
@@ -88,10 +106,10 @@ STATIC Void canny_edge_Derivative(short int *smoothedim, int rows, int cols, sho
 STATIC Void canny_edge_Magnitude(short int *delta_x, short int *delta_y, int rows, int cols, short int *magnitude, Uint8 processorId);
 
 /* Used neon functions */
-STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Uint16 rows, Uint16 cols, float sigma);
+STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Uint16 rows, Uint16 cols);
 
 /* Used GPP functions */
-STATIC void gaussian_smooth(unsigned char *image, short int* smoothedim, int rows, int cols, float sigma);
+STATIC void gaussian_smooth(unsigned char *image, short int* smoothedim, int rows, int cols);
 STATIC void make_gaussian_kernel(float sigma, float **kernel, int *windowsize);
 STATIC void derivative_x_y(short int *smoothedim, int rows, int cols, short int **delta_x, short int **delta_y);
 STATIC void magnitude_x_y(short int *delta_x, short int *delta_y, int rows, int cols, short int *magnitude);
@@ -336,6 +354,10 @@ NORMAL_API DSP_STATUS canny_edge_Execute (Uint8 processorId, IN Char8 * strImage
     unsigned char *nms = (unsigned char *)malloc(sizeof(unsigned char) * canny_edge_rows * canny_edge_cols);
     unsigned char *edge = (unsigned char *)malloc(sizeof(unsigned char) * canny_edge_rows * canny_edge_cols);
     char outfilename[128];    /* Name of the output "edge" image */
+#if VERIFY
+    int i, windowsize;
+    float *kernel;
+#endif
 
     VPRINT("Entered canny_edge_Execute ()\n");
 
@@ -351,14 +373,30 @@ NORMAL_API DSP_STATUS canny_edge_Execute (Uint8 processorId, IN Char8 * strImage
     canny_edge_Writeback(image, canny_edge_rows, canny_edge_cols, processorId);
 #endif
 
+#if VERIFY
+    /* Verify pre-computed (harcoded) kernel values */
+    VPRINT(" Verifying pre-computed kernel values.. \r \n");
+    make_gaussian_kernel(SIGMA, &kernel, &windowsize);
+    for (i = 0; i < windowsize; i++)
+    {
+        if(gaussian_kernel[i] != kernel[i]){
+            fprintf(stderr, "Incorrect kernel value! Expected %f, Got %f (i: %d)\r\n", kernel[i], gaussian_kernel[i], i);
+        }
+    }
+
+    if(DSP_SUCCEEDED(status)) {
+        VPRINT("Precomputed kernel values are correct!\r\n");
+    }
+#endif
+
     /* Do the guassian smoothing */
     VPRINT(" Starting guassian smoothing\r\n");
 #if GAUSSIAN_DSP
 
-#elif GUASSIAN_NEON
-    gaussian_smooth_neon(image, smoothedim, canny_edge_rows, canny_edge_cols, SIGMA);
+#elif GAUSSIAN_NEON
+    gaussian_smooth_neon(image, smoothedim, canny_edge_rows, canny_edge_cols);
 #else
-    gaussian_smooth(image, smoothedim, canny_edge_rows, canny_edge_cols, SIGMA);
+    gaussian_smooth(image, smoothedim, canny_edge_rows, canny_edge_cols);
 #endif
 
     /* Calculate the derivatives */
@@ -400,6 +438,10 @@ NORMAL_API DSP_STATUS canny_edge_Execute (Uint8 processorId, IN Char8 * strImage
     free(magnitude);
     free(nms);
     free(edge);
+#if VERIFY
+    free(kernel);
+#endif
+
 
     return status;
 }
@@ -437,6 +479,7 @@ NORMAL_API Void canny_edge_Delete (Uint8 processorId)
 
     /* Free the canny edge image */
     free(canny_edge_image);
+    //free(gaussian_kernel);
 
     /*
      *  Stop execution on DSP.
@@ -731,15 +774,13 @@ STATIC Void canny_edge_Magnitude(short int *delta_x, short int *delta_y, int row
 //////////////////////////////////////////////////////////////////////////////////////////
 
 /* Guassian smooth on Neon */
-STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Uint16 rows, Uint16 cols, float sigma)
+STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Uint16 rows, Uint16 cols)
 {
 #if VERIFY
     short int *verify_smoothedim=(short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
 #endif
 
-    int windowsize;          
-    float *tempim,        
-          *kernel;            
+    float *tempim;           
     float *rows_image;                     /* Image for x-smoothing*/
     float *cols_image;                    /*  Image for y-smoothing*/
     float neon_kernel[17];               /* New kernel for neon */
@@ -752,12 +793,6 @@ STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Ui
     float dot= 0.0f;              /* The sum of pixel values */
     float Referkernel = 0.0f;      /* Intermediate sum of filter values considering boundary situation */
     float sum = 0.0f;             /* The sum of filter values */
-    
-    /****************************************************************************
-    * Create a 1-dimensional gaussian smoothing kernel.
-    ****************************************************************************/
-    VPRINT("   Computing the gaussian smoothing kernel.\n");
-    make_gaussian_kernel(sigma, &kernel, &windowsize);
 
     /****************************************************************************
     * Allocate a temporary buffer image and the smoothed image.
@@ -775,7 +810,7 @@ STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Ui
     for (b = 0 ; b <= 16 ; b++)
     {
         if(b > 0 && b < 16 )
-            neon_kernel[b] = kernel [b-1];
+            neon_kernel[b] = gaussian_kernel [b-1];
         else
             neon_kernel [b] = 0;    
     }
@@ -890,11 +925,10 @@ STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Ui
     free(rows_image);
     free(cols_image);
     free(tempim);
-    free(kernel);
 
 #if VERIFY
     /* Verify guassian smooth neon using the GPP code */
-    gaussian_smooth(image, verify_smoothedim, canny_edge_rows, canny_edge_cols, SIGMA);
+    gaussian_smooth(image, verify_smoothedim, canny_edge_rows, canny_edge_cols);
 
     /* Check if it matches */
     for(i = 0; i < rows*cols; i++) {
@@ -1014,22 +1048,15 @@ STATIC void derivative_x_y(short int *smoothedim, int rows, int cols,
 * NAME: Mike Heath
 * DATE: 2/15/96
 *******************************************************************************/
-STATIC void gaussian_smooth(unsigned char *image, short int* smoothedim, int rows, int cols, float sigma)
+STATIC void gaussian_smooth(unsigned char *image, short int* smoothedim, int rows, int cols)
 {
     int r, c, rr, cc,     /* Counter variables. */
-        windowsize,        /* Dimension of the gaussian kernel. */
         center;            /* Half of the windowsize. */
     float *tempim,        /* Buffer for separable filter gaussian smoothing. */
-          *kernel,        /* A one dimensional gaussian kernel. */
           dot,            /* Dot product summing variable. */
           sum;            /* Sum of the kernel weights variable. */
-
-    /****************************************************************************
-    * Create a 1-dimensional gaussian smoothing kernel.
-    ****************************************************************************/
-    VPRINT("   Computing the gaussian smoothing kernel.\n");
-    make_gaussian_kernel(sigma, &kernel, &windowsize);
-    center = windowsize / 2;
+    
+    center = windowsize_kernel / 2;
 
 
     /****************************************************************************
@@ -1055,8 +1082,8 @@ STATIC void gaussian_smooth(unsigned char *image, short int* smoothedim, int row
             {
                 if(((c+cc) >= 0) && ((c+cc) < cols))
                 {
-                    dot += (float)image[r*cols+(c+cc)] * kernel[center+cc];
-                    sum += kernel[center+cc];
+                    dot += (float)image[r*cols+(c+cc)] * gaussian_kernel[center+cc];
+                    sum += gaussian_kernel[center+cc];
                 }
             }
             tempim[r*cols+c] = dot/sum;
@@ -1077,8 +1104,8 @@ STATIC void gaussian_smooth(unsigned char *image, short int* smoothedim, int row
             {
                 if(((r+rr) >= 0) && ((r+rr) < rows))
                 {
-                    dot += tempim[(r+rr)*cols+c] * kernel[center+rr];
-                    sum += kernel[center+rr];
+                    dot += tempim[(r+rr)*cols+c] * gaussian_kernel[center+rr];
+                    sum += gaussian_kernel[center+rr];
                 }
             }
             smoothedim[r*cols+c] = (short int)(dot*BOOSTBLURFACTOR/sum + 0.5);
@@ -1086,7 +1113,6 @@ STATIC void gaussian_smooth(unsigned char *image, short int* smoothedim, int row
     }
 
     free(tempim);
-    free(kernel);
 }
 
 /*******************************************************************************
@@ -1121,7 +1147,7 @@ STATIC void make_gaussian_kernel(float sigma, float **kernel, int *windowsize)
 
     if(VERBOSE)
     {
-        printf("The filter coefficients are:\n");
+        printf("The computed filter coefficients are:\n");
         for(i=0; i<(*windowsize); i++)
             printf("kernel[%d] = %f\n", i, (*kernel)[i]);
     }
