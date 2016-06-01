@@ -634,7 +634,7 @@ STATIC Void canny_edge_Gaussian(unsigned char *image, int rows, int cols, short 
                     buffer_sizes[1]);
     /* Check if the result is correct */
 #if VERIFY
-    /* Verify magnitude using the GPP code */
+    /* Verify gaussian smooth dsp using the GPP code */
     gaussian_smooth(image, verify_smoothedim, canny_edge_rows, canny_edge_cols, SIGMA);
 
     /* Check if it matches */
