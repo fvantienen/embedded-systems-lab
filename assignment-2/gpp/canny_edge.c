@@ -35,13 +35,13 @@ extern "C" {
 
 /* Enable verbose printing by default */
 #ifndef VERBOSE
-#define VERBOSE 1
+#define VERBOSE 0
 #endif
 #define VPRINT if(VERBOSE) printf
 
 /* Enable verify by default (makes it slower) */
 #ifndef VERIFY
-#define VERIFY 1
+#define VERIFY 0
 #endif
 
 /* Pool and message defines */
@@ -84,7 +84,7 @@ STATIC Void canny_edge_Writeback(unsigned char *image, int rows, int cols, Uint8
 STATIC Void canny_edge_Derivative(short int *smoothedim, int rows, int cols, short int *delta_x, short int *delta_y, Uint8 processorId);
 
 /* Used neon functions */
-STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, int rows, int cols, float sigma);
+STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Uint16 rows, Uint16 cols, float sigma);
 
 /* Used GPP functions */
 STATIC void gaussian_smooth(unsigned char *image, short int* smoothedim, int rows, int cols, float sigma);
@@ -111,10 +111,7 @@ NORMAL_API DSP_STATUS canny_edge_Create (	IN Char8 * dspExecutable,
     SMAPOOL_Attrs   poolAttrs;
     Uint16          i, j;
 
-	#ifdef DEBUG
-    printf ("Entered canny_edge_Create ()\n") ;
-	#endif
- 
+    VPRINT("Entered canny_edge_Create ()\n") ;
     sem_init(&sem,0,0);
 
     /*
@@ -334,8 +331,6 @@ NORMAL_API DSP_STATUS canny_edge_Execute (Uint8 processorId, IN Char8 * strImage
     unsigned char *nms = (unsigned char *)malloc(sizeof(unsigned char) * canny_edge_rows * canny_edge_cols);
     unsigned char *edge = (unsigned char *)malloc(sizeof(unsigned char) * canny_edge_rows * canny_edge_cols);
     char outfilename[128];    /* Name of the output "edge" image */
-
-    printf("%p %p %p %p\r\n", image, smoothedim, delta_x, delta_y);
 
     VPRINT("Entered canny_edge_Execute ()\n");
 
@@ -559,7 +554,9 @@ STATIC Void canny_edge_Notify (Uint32 eventNo, Pvoid arg, Pvoid info)
 /* Simple function which transmits the image and expects it back with each pixel +1 */
 STATIC Void canny_edge_Writeback(unsigned char *image, int rows, int cols, Uint8 processorId)
 {
+#if VERIFY
     int i, status;
+#endif
 
     /* Send the image */
     POOL_writeback (POOL_makePoolId(processorId, SAMPLE_POOL_ID),
@@ -577,24 +574,29 @@ STATIC Void canny_edge_Writeback(unsigned char *image, int rows, int cols, Uint8
                     sizeof(unsigned char) * rows * cols);
 
     /* Check if the result is correct */
-    if(VERIFY) {
-        status = DSP_SOK;
-        for(i = 0; i < (rows * cols); i++) {
-            canny_edge_image[i]++;
-            if(image[i] != canny_edge_image[i]) {
-                fprintf(stderr, "Got incorrect image back! Expected %d, Got %d (i: %d)\r\n", canny_edge_image[i], image[i], i);
-                status = DSP_EFAIL;
-            }
+#if VERIFY
+    status = DSP_SOK;
+    for(i = 0; i < (rows * cols); i++) {
+        canny_edge_image[i]++;
+        if(image[i] != canny_edge_image[i]) {
+            fprintf(stderr, "Got incorrect image back! Expected %d, Got %d (i: %d)\r\n", canny_edge_image[i], image[i], i);
+            status = DSP_EFAIL;
         }
-
-        if(DSP_SUCCEEDED(status))
-            VPRINT("Writeback was succesfull!\r\n");
     }
+
+    if(DSP_SUCCEEDED(status))
+        VPRINT("Writeback was succesfull!\r\n");
+#endif
 }
 
 STATIC Void canny_edge_Derivative(short int *smoothedim, int rows, int cols, short int *delta_x, short int *delta_y, Uint8 processorId)
 {
-    int i, status;
+#if VERIFY
+    int i;
+    int status = DSP_SOK;
+    short int *verify_delta_x = (short int *) malloc(sizeof(short int) * rows * cols);
+    short int *verify_delta_y = (short int *) malloc(sizeof(short int) * rows * cols);
+#endif
 
     /* Send smoothedim */
     POOL_writeback (POOL_makePoolId(processorId, SAMPLE_POOL_ID),
@@ -616,34 +618,32 @@ STATIC Void canny_edge_Derivative(short int *smoothedim, int rows, int cols, sho
                     delta_y,
                     buffer_sizes[3]);
 
+#if VERIFY
     /* verify with GPP function */
-    if(VERIFY){
-      status = DSP_SOK;
-      short int *verify_delta_x = (short int *) malloc(sizeof(short int) * rows * cols);
-      short int *verify_delta_y = (short int *) malloc(sizeof(short int) * rows * cols);
-      derivative_x_y(smoothedim, rows, cols, &verify_delta_x, &verify_delta_y);
-      
-      /* Check for delta_x*/
-      for(i = 0; i < rows*cols; i++) {
-            if(delta_x[i] != verify_delta_x[i]) {
-                fprintf(stderr, "Got incorrect delta_x result back! Expected %d, Got %d (i: %d)\r\n", verify_delta_x[i], delta_x[i], i);
-                status = DSP_EFAIL;
-            }
-      }
-      /* Check for delta_y*/
-      for(i = 0; i < rows*cols; i++) {
-            if(delta_y[i] != verify_delta_y[i]) {
-                fprintf(stderr, "Got incorrect delta_y result back! Expected %d, Got %d (i: %d)\r\n", verify_delta_y[i], delta_y[i], i);
-                status = DSP_EFAIL;
-            }
-      }
-
-      /* Print if verify was succesfull */
-      if(DSP_SUCCEEDED(status))
-        VPRINT("Execution of canny_edge_Derivative was succesfull!\r\n");
-      else
-        fprintf(stderr, "Execution of canny_edge_Derivative was FAILED!\r\n");
+    derivative_x_y(smoothedim, rows, cols, &verify_delta_x, &verify_delta_y);
+  
+    /* Check for delta_x*/
+    for(i = 0; i < rows*cols; i++) {
+        if(delta_x[i] != verify_delta_x[i]) {
+            fprintf(stderr, "Got incorrect delta_x result back! Expected %d, Got %d (i: %d)\r\n", verify_delta_x[i], delta_x[i], i);
+            status = DSP_EFAIL;
+        }
     }
+
+    /* Check for delta_y*/
+    for(i = 0; i < rows*cols; i++) {
+        if(delta_y[i] != verify_delta_y[i]) {
+            fprintf(stderr, "Got incorrect delta_y result back! Expected %d, Got %d (i: %d)\r\n", verify_delta_y[i], delta_y[i], i);
+            status = DSP_EFAIL;
+        }
+    }
+
+    /* Print if verify was succesfull */
+    if(DSP_SUCCEEDED(status))
+        VPRINT("Execution of canny_edge_Derivative was succesfull!\r\n");
+    else
+        fprintf(stderr, "Execution of canny_edge_Derivative was FAILED!\r\n");
+#endif
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////
@@ -651,7 +651,7 @@ STATIC Void canny_edge_Derivative(short int *smoothedim, int rows, int cols, sho
 //////////////////////////////////////////////////////////////////////////////////////////
 
 /* Guassian smooth on Neon */
-STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, int rows, int cols, float sigma)
+STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Uint16 rows, Uint16 cols, float sigma)
 {
     int windowsize;          
     float *tempim,        
@@ -735,16 +735,16 @@ STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, in
                 {
                     e=1;
                 }
-                neon_pixel = vld1q_f32((float32_t const *)&rows_image[r*neon_cols+c+j*4+e]);
-                neon_factor = vld1q_f32((float32_t const *)&neon_kernel[j*4+e]);
-                temp_dot = vmlaq_f32(temp_dot,neon_pixel,neon_factor);
+                //neon_pixel = vld1q_f32((float32_t const *)&rows_image[r*neon_cols+c+j*4+e]);
+                //neon_factor = vld1q_f32((float32_t const *)&neon_kernel[j*4+e]);
+                //temp_dot = vmlaq_f32(temp_dot, neon_pixel, neon_factor);
             }
             
     
-            for( t=0; t<=3; t++){   
-                        
-                dot += vgetq_lane_f32(temp_dot,t ); 
-            }
+            dot += vgetq_lane_f32(temp_dot, 0);
+            dot += vgetq_lane_f32(temp_dot, 1);
+            dot += vgetq_lane_f32(temp_dot, 2);
+            dot += vgetq_lane_f32(temp_dot, 3);
             dot += rows_image[r*neon_cols+c+8] * neon_kernel[8];
             tempim[r*cols+c] = dot/sum;
             dot=0; 
@@ -794,11 +794,12 @@ STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, in
             }
             
         
-            for( t=0; t<=3; t++){              
-                dot += vgetq_lane_f32(temp_dot,t ); 
-            }
+            dot += vgetq_lane_f32(temp_dot, 0);
+            dot += vgetq_lane_f32(temp_dot, 1);
+            dot += vgetq_lane_f32(temp_dot, 2);
+            dot += vgetq_lane_f32(temp_dot, 3);
             dot += cols_image[c*neon_rows+r+8] * neon_kernel[8];
-            smoothedim[r*cols+c] = (unsigned short int )(dot*BOOSTBLURFACTOR/sum + 0.5);
+            smoothedim[r*cols+c] = (short int )(dot*BOOSTBLURFACTOR/sum + 0.5);
             dot=0; 
         }
     }
