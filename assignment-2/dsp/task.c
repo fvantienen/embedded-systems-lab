@@ -18,18 +18,23 @@
 #include <task.h>
 
 /* Buffer defines */
-#define NUM_BUF_SIZES                    2 ///< Amount of pools to be configured
+#define NUM_BUF_SIZES                    5 ///< Amount of pools to be configured
 #define NUM_BUF_POOL0                    1 ///< Amount of buffers in the first pool
 #define NUM_BUF_POOL1                    1 ///< Amount of buffers in the second pool
+#define NUM_BUF_POOL2                    1 ///< Amount of buffers in the thrid pool
+#define NUM_BUF_POOL3                    1 ///< Amount of buffers in the fourth pool
+#define NUM_BUF_POOL4                    1 ///< Amount of buffers in the fifth pool
 #define NUM_BUF_MAX                      1 ///< Maximum amount of buffers in pool
 
 enum {
     canny_edge_INIT,                    ///< Initialization stage
     canny_edge_DELETE,                  ///< Shutdown step
-    canny_edge_WRITEBACK                ///< Simple write back program
+    canny_edge_WRITEBACK,               ///< Simple write back program
+    canny_edge_DERIVATIVE,              ///< Calculate the derivatives
+    canny_edge_MAGNITUDE                ///< Calculate the magnitude
 };
 
-Uint32 pool_sizes[] = {NUM_BUF_POOL0, NUM_BUF_POOL1};
+Uint32 pool_sizes[] = {NUM_BUF_POOL0, NUM_BUF_POOL1, NUM_BUF_POOL2, NUM_BUF_POOL3, NUM_BUF_POOL4};
 Void *dsp_buffers[NUM_BUF_SIZES][NUM_BUF_MAX];      ///< Buffer addresses on the DSP
 Uint32 buffer_sizes[NUM_BUF_SIZES];                 ///< The buffer sizes
 Uint16 canny_edge_rows = 0;           ///< Columns of the image
@@ -158,6 +163,73 @@ Int Task_delete (Task_TransferInfo * info)
     return status ;
 }
 
+Void Task_derivative(Void)
+{
+  Uint32 r, c, pos;
+  short int *smoothedim = (short int *)dsp_buffers[1][0];
+  short int *delta_x = (short int *)dsp_buffers[2][0];
+  short int *delta_y = (short int *)dsp_buffers[3][0];
+
+  /* Invalidate cache */
+  BCACHE_inv (dsp_buffers[1][0], buffer_sizes[1], TRUE);
+
+  /* Calculate the X direction */
+  for(r=0; r < canny_edge_rows; r++){
+    pos = r * canny_edge_cols;
+    (delta_x)[pos] = smoothedim[pos+1] - smoothedim[pos];
+    pos++;
+    for(c=1; c < (canny_edge_cols-1); c++, pos++){
+      (delta_x)[pos] = smoothedim[pos+1] - smoothedim[pos-1];
+    }
+    (delta_x)[pos] = smoothedim[pos] - smoothedim[pos-1];
+  }
+
+  /* Calculate the Y direction */
+  for(c=0; c < canny_edge_cols; c++){
+    pos = c;
+    (delta_y)[pos] = smoothedim[pos + canny_edge_cols] - smoothedim[pos];
+    pos += canny_edge_cols;
+    for(r=1; r < (canny_edge_rows - 1); r++, pos += canny_edge_cols){
+      (delta_y)[pos] = smoothedim[pos + canny_edge_cols] - smoothedim[pos - canny_edge_cols];
+    }
+    (delta_y)[pos] = smoothedim[pos] - smoothedim[pos - canny_edge_cols];
+  }
+
+  /* Write back and invalidate */
+  BCACHE_wbInv(dsp_buffers[2][0], buffer_sizes[2], TRUE);
+  BCACHE_wbInv(dsp_buffers[3][0], buffer_sizes[3], TRUE);
+
+  /* Notify the GPP that DSP is done */
+  NOTIFY_notify(ID_GPP, MPCSXFER_IPS_ID, MPCSXFER_IPS_EVENTNO, canny_edge_DERIVATIVE);
+}
+
+Void Task_magnitude(Void)
+{
+  Uint32 r, c, pos, sq1, sq2;
+  short int *delta_x = (short int *)dsp_buffers[2][0];
+  short int *delta_y = (short int *)dsp_buffers[3][0];
+  int *magnitude_sq = (int *)dsp_buffers[4][0];
+
+   /* Invalidate cache */
+  BCACHE_inv (dsp_buffers[2][0], buffer_sizes[2], TRUE);
+  BCACHE_inv (dsp_buffers[3][0], buffer_sizes[3], TRUE);
+
+  for(r = 0, pos = 0; r < canny_edge_rows; r++)
+  {
+    for(c = 0; c < canny_edge_cols; c++, pos++)
+    {
+        sq1 = (int)delta_x[pos] * (int)delta_x[pos];
+        sq2 = (int)delta_y[pos] * (int)delta_y[pos];
+        magnitude_sq[pos] = (int) sq1+sq2; //(0.5 + sqrt((float)sq1 + (float)sq2));
+    }
+  }
+
+  /* Write back and invalidate */
+  BCACHE_wbInv(dsp_buffers[4][0], buffer_sizes[4], TRUE);
+
+  /* Notify the result */
+  NOTIFY_notify(ID_GPP, MPCSXFER_IPS_ID, MPCSXFER_IPS_EVENTNO, canny_edge_MAGNITUDE);
+}
 
 static Void Task_notify (Uint32 eventNo, Ptr arg, Ptr info)
 {
@@ -215,6 +287,12 @@ static Void Task_notify (Uint32 eventNo, Ptr arg, Ptr info)
       }
       else if((Uint32)info == canny_edge_WRITEBACK) {
         Task_writeback();
+      }
+      else if((Uint32)info == canny_edge_DERIVATIVE) {
+        Task_derivative();
+      }
+      else if((Uint32)info == canny_edge_MAGNITUDE) {
+        Task_magnitude();
       }
     }   
 }
