@@ -29,10 +29,11 @@ extern "C" {
 #endif /* defined (__cplusplus) */
 
 /* Enable / Disable DSP/NEON */
-//#define GAUSSIAN_DSP 1
-//#define GUASSIAN_NEON 1
-//#define DERIVATIVE_DSP 1
 #define GAUSSIAN_DSP 1
+#define GUASSIAN_NEON 1
+#define DERIVATIVE_DSP 1
+#define MAGNITUDE_DSP 1
+
 /* Enable verbose printing by default */
 #ifndef VERBOSE
 #define VERBOSE 1
@@ -41,16 +42,17 @@ extern "C" {
 
 /* Enable verify by default (makes it slower) */
 #ifndef VERIFY
-#define VERIFY 0
+#define VERIFY 1
 #endif
 
 /* Pool and message defines */
 #define SAMPLE_POOL_ID                   0 ///< Pool number used for data transfers
-#define NUM_BUF_SIZES                    4 ///< Amount of pools to be configured
+#define NUM_BUF_SIZES                    5 ///< Amount of pools to be configured
 #define NUM_BUF_POOL0                    1 ///< Amount of buffers in the first pool
 #define NUM_BUF_POOL1                    1 ///< Amount of buffers in the second pool
 #define NUM_BUF_POOL2                    1 ///< Amount of buffers in the thrid pool
 #define NUM_BUF_POOL3                    1 ///< Amount of buffers in the fourth pool
+#define NUM_BUF_POOL4                    1 ///< Amount of buffers in the fifth pool
 #define NUM_BUF_MAX                      1 ///< Maximum amount of buffers in pool
 #define canny_edge_IPS_ID                0 ///< IPS ID used for sending notifications to the DPS
 #define canny_edge_IPS_EVENTNO           5 ///< Event number used for notifications to the DSP
@@ -58,16 +60,17 @@ extern "C" {
 enum {
     canny_edge_INIT,                    ///< Initialization stage
     canny_edge_DELETE,                  ///< Shutdown step
-    canny_edge_WRITEBACK,				///< Simple write back program
+    canny_edge_WRITEBACK,               ///< Simple write back program
     canny_edge_GAUSSIAN,                ///< Calculate the Gaussian
-    canny_edge_DERIVATIVE               ///< Calculate the derivatives
+    canny_edge_DERIVATIVE,              ///< Calculate the derivatives
+    canny_edge_MAGNITUDE                ///< Calculate the magnitude
 };
 
 /* General variables */
 sem_t sem;                                              ///< Semaphore used for synchronising events
 unsigned char *canny_edge_image;                        ///< The canny edge input image
 int canny_edge_rows, canny_edge_cols;                   ///< The canny edge input width and height
-Uint32 pool_sizes[] = {NUM_BUF_POOL0, NUM_BUF_POOL1, NUM_BUF_POOL2, NUM_BUF_POOL3};   ///< The pool sizes
+Uint32 pool_sizes[] = {NUM_BUF_POOL0, NUM_BUF_POOL1, NUM_BUF_POOL2, NUM_BUF_POOL3, NUM_BUF_POOL4};   ///< The pool sizes
 Uint32 buffer_sizes[NUM_BUF_SIZES];                     ///< The buffer sizes
 Void *buffers[NUM_BUF_SIZES][NUM_BUF_MAX];              ///< The buffers
 Void *dsp_buffers[NUM_BUF_SIZES][NUM_BUF_MAX];          ///< Buffer addresses on the DSP
@@ -84,6 +87,7 @@ STATIC Void canny_edge_Notify(Uint32 eventNo, Pvoid arg, Pvoid info);
 STATIC Void canny_edge_Writeback(unsigned char *image, int rows, int cols, Uint8 processorId);
 STATIC Void canny_edge_Gaussian(unsigned char *image, int rows, int cols, short int *smoothedim, Uint8 processorId);
 STATIC Void canny_edge_Derivative(short int *smoothedim, int rows, int cols, short int *delta_x, short int *delta_y, Uint8 processorId);
+STATIC Void canny_edge_Magnitude(short int *delta_x, short int *delta_y, int rows, int cols, short int *magnitude, Uint8 processorId);
 
 /* Used neon functions */
 STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Uint16 rows, Uint16 cols, float sigma);
@@ -152,6 +156,7 @@ NORMAL_API DSP_STATUS canny_edge_Create (	IN Char8 * dspExecutable,
     buffer_sizes[1] = DSPLINK_ALIGN(sizeof(short int) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN); //smoothedim
     buffer_sizes[2] = DSPLINK_ALIGN(sizeof(short int) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN); //delta_x
     buffer_sizes[3] = DSPLINK_ALIGN(sizeof(short int) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN); //delta_y
+    buffer_sizes[4] = DSPLINK_ALIGN(sizeof(int) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN); //magnitude
 
     /*
      *  Open the pool.
@@ -351,7 +356,7 @@ NORMAL_API DSP_STATUS canny_edge_Execute (Uint8 processorId, IN Char8 * strImage
     /* Do the guassian smoothing */
     VPRINT(" Starting guassian smoothing\r\n");
 #if GAUSSIAN_DSP
-	canny_edge_Gaussian(image, canny_edge_rows, canny_edge_cols, smoothedim, processorId);
+    canny_edge_Gaussian(image, canny_edge_rows, canny_edge_cols, smoothedim, processorId);
 #elif GUASSIAN_NEON
     gaussian_smooth_neon(image, smoothedim, canny_edge_rows, canny_edge_cols, SIGMA);
 #else
@@ -368,7 +373,11 @@ NORMAL_API DSP_STATUS canny_edge_Execute (Uint8 processorId, IN Char8 * strImage
 
     /* Compute the magnitude */
     VPRINT(" Starting magnitude x, y\r\n");
+#if MAGNITUDE_DSP
+    canny_edge_Magnitude(delta_x, delta_y, canny_edge_rows, canny_edge_cols, magnitude, processorId);
+#else
     magnitude_x_y(delta_x, delta_y, canny_edge_rows, canny_edge_cols, magnitude);
+#endif
 
     /* Do the Non maximal suppression */
     VPRINT(" Starting non maximal suppression \r\n");
@@ -388,6 +397,11 @@ NORMAL_API DSP_STATUS canny_edge_Execute (Uint8 processorId, IN Char8 * strImage
         fprintf(stderr, "Error writing the edge image, %s.\n", outfilename);
         status = DSP_EFAIL;
     }
+
+    /* Free buffers */
+    free(magnitude);
+    free(nms);
+    free(edge);
 
     return status;
 }
@@ -548,6 +562,8 @@ STATIC Void canny_edge_Notify (Uint32 eventNo, Pvoid arg, Pvoid info)
         sem_post(&sem);
     } else if((int)info == canny_edge_DERIVATIVE) {
         sem_post(&sem);
+    } else if((int)info == canny_edge_MAGNITUDE) {
+        sem_post(&sem);
     }
 }
 
@@ -617,7 +633,6 @@ STATIC Void canny_edge_Gaussian(unsigned char *image, int rows, int cols, short 
     /* Check if the result is correct */
 }
 
-
 STATIC Void canny_edge_Derivative(short int *smoothedim, int rows, int cols, short int *delta_x, short int *delta_y, Uint8 processorId)
 {
 #if VERIFY
@@ -668,10 +683,74 @@ STATIC Void canny_edge_Derivative(short int *smoothedim, int rows, int cols, sho
     }
 
     /* Print if verify was succesfull */
-    if(DSP_SUCCEEDED(status))
+    if(DSP_SUCCEEDED(status)) {
         VPRINT("Execution of canny_edge_Derivative was succesfull!\r\n");
-    else
+    }
+    else {
         fprintf(stderr, "Execution of canny_edge_Derivative was FAILED!\r\n");
+    }
+
+    free(verify_delta_x);
+    free(verify_delta_y);
+#endif
+}
+
+STATIC Void canny_edge_Magnitude(short int *delta_x, short int *delta_y, int rows, int cols, short int *magnitude, Uint8 processorId)
+{
+    int i;
+    int *magnitude_square = (int *)buffers[4][0];
+#if VERIFY
+    int status = DSP_SOK;
+    short int *gpp_magnitude = (short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
+#endif
+
+    /* Send the input data */
+    /* Send delta_x */
+    POOL_writeback (POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                    delta_x,
+                    buffer_sizes[2]);
+    /* Send delta_y */
+    POOL_writeback (POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                    delta_y,
+                    buffer_sizes[3]);
+
+
+    NOTIFY_notify (processorId, canny_edge_IPS_ID, canny_edge_IPS_EVENTNO, canny_edge_MAGNITUDE);
+    VPRINT("  canny_edge_Magnitude send, waiting for response...\r\n");
+
+    /* Wait for the response */
+    sem_wait(&sem);
+
+    /* Invalidate the result */
+    POOL_invalidate(POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                    magnitude,
+                    buffer_sizes[4]);
+
+    /* Do sqrt on GPP */
+    for(i=0; i < rows*cols; i++)
+    {
+        magnitude[i] = (short)(0.5 + sqrt((float)magnitude_square[i]));
+    }
+
+#if VERIFY
+    /* Verify magnitude using the GPP code */
+    magnitude_x_y(delta_x, delta_y, canny_edge_rows, canny_edge_cols, gpp_magnitude);
+
+    /* Check if it matches */
+    for(i = 0; i < rows*cols; i++) {
+        if(magnitude[i] != gpp_magnitude[i]) {
+            fprintf(stderr, "Got incorrect magnitude result back! Expected %d, Got %d (i: %d)\r\n", gpp_magnitude[i], magnitude[i], i);
+            status = DSP_EFAIL;
+        }
+    }
+
+    if(DSP_SUCCEEDED(status)) {
+        VPRINT("Execution of canny_edge_Magnitude was succesfull!\r\n");
+    }
+    else {
+        fprintf(stderr, "Execution of canny_edge_Magnitude FAILED!\r\n");
+    }
+    free(gpp_magnitude);
 #endif
 }
 
@@ -682,6 +761,10 @@ STATIC Void canny_edge_Derivative(short int *smoothedim, int rows, int cols, sho
 /* Guassian smooth on Neon */
 STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Uint16 rows, Uint16 cols, float sigma)
 {
+#if VERIFY
+    short int *verify_smoothedim=(short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
+#endif
+
     int windowsize;          
     float *tempim,        
           *kernel;            
@@ -690,7 +773,7 @@ STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Ui
     float neon_kernel[17];               /* New kernel for neon */
     unsigned int neon_cols=cols+16;     /* Cols value for x-direction*/
     unsigned int neon_rows=rows+16;     /* Rows value for y-direction*/
-    unsigned int i, k, a, c, r, j,t,b; /*Loop variant*/
+    unsigned int i, k, a, c, r, j, b; /*Loop variant*/
     float32x4_t neon_pixel;       /* Four consecutive pixel values */
     float32x4_t neon_factor;      /* Four consecutive filter values */
     float32x4_t temp_dot;         /* The neon multiplication result store here */
@@ -764,9 +847,9 @@ STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Ui
                 {
                     e=1;
                 }
-                //neon_pixel = vld1q_f32((float32_t const *)&rows_image[r*neon_cols+c+j*4+e]);
-                //neon_factor = vld1q_f32((float32_t const *)&neon_kernel[j*4+e]);
-                //temp_dot = vmlaq_f32(temp_dot, neon_pixel, neon_factor);
+                neon_pixel = vld1q_f32((float32_t const *)&rows_image[r*neon_cols+c+j*4+e]);
+                neon_factor = vld1q_f32((float32_t const *)&neon_kernel[j*4+e]);
+                temp_dot = vmlaq_f32(temp_dot, neon_pixel, neon_factor);
             }
             
     
@@ -836,6 +919,25 @@ STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Ui
     free(cols_image);
     free(tempim);
     free(kernel);
+
+#if VERIFY
+    /* Verify guassian smooth neon using the GPP code */
+    gaussian_smooth(image, verify_smoothedim, canny_edge_rows, canny_edge_cols, SIGMA);
+
+    /* Check if it matches */
+    for(i = 0; i < rows*cols; i++) {
+        if(smoothedim[i] != verify_smoothedim[i]) {
+            fprintf(stderr, "Got incorrect guassian smooth result back! Expected %d, Got %d (i: %d)\r\n", verify_smoothedim[i], smoothedim[i], i);
+        }
+    }
+
+    
+    fprintf(stderr, "Execution of guassian_smooth_neon was successful\r\n");
+    
+    free(verify_smoothedim);
+#endif
+
+
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////
