@@ -64,12 +64,12 @@ extern "C" {
 #define canny_edge_IPS_EVENTNO           5 ///< Event number used for notifications to the DSP
 
 enum {
-    canny_edge_INIT,                    ///< Initialization stage
-    canny_edge_DELETE,                  ///< Shutdown step
-    canny_edge_WRITEBACK,               ///< Simple write back program
-    canny_edge_GAUSSIAN,                ///< Calculate the Gaussian
-    canny_edge_DERIVATIVE,              ///< Calculate the derivatives
-    canny_edge_MAGNITUDE                ///< Calculate the magnitude
+  canny_edge_INIT,                    ///< Initialization stage
+  canny_edge_DELETE,                  ///< Shutdown step
+  canny_edge_WRITEBACK,               ///< Simple write back program
+  canny_edge_GAUSSIAN,                ///< Calculate the Gaussian
+  canny_edge_DERIVATIVE,              ///< Calculate the derivatives
+  canny_edge_MAGNITUDE                ///< Calculate the magnitude
 };
 
 /* General variables */
@@ -96,7 +96,8 @@ float gaussian_kernel[] = { 0.0031742106657475233078003,  /* kernel[0] */
                             0.0444807782769203186035156,  /* kernel[11] */
                             0.0216511301696300506591797,  /* kernel[12] */
                             0.0089805237948894500732422,  /* kernel[13] */
-                            0.0031742106657475233078003}; /* kernel[14] */
+                            0.0031742106657475233078003
+                          }; /* kernel[14] */
 int windowsize_kernel = 15; /* Dimension of the gaussian kernel. */
 
 
@@ -110,20 +111,24 @@ int windowsize_kernel = 15; /* Dimension of the gaussian kernel. */
 STATIC Void canny_edge_Notify(Uint32 eventNo, Pvoid arg, Pvoid info);
 STATIC Void canny_edge_Writeback(unsigned char *image, int rows, int cols, Uint8 processorId);
 STATIC Void canny_edge_Gaussian(unsigned char *image, int rows, int cols, short int *smoothedim, Uint8 processorId);
-STATIC Void canny_edge_Derivative(short int *smoothedim, int rows, int cols, short int *delta_x, short int *delta_y, short int *percentage, Uint8 processorId);
-STATIC Void canny_edge_Magnitude(short int *delta_x, short int *delta_y, int rows, int cols, short int *magnitude, Uint8 processorId);
+STATIC Void canny_edge_Derivative(short int *smoothedim, int rows, int cols, short int *delta_x, short int *delta_y,
+                                  short int *percentage, Uint8 processorId);
+STATIC Void canny_edge_Magnitude(short int *delta_x, short int *delta_y, int rows, int cols, short int *magnitude,
+                                 Uint8 processorId);
 
 /* Used neon functions */
-STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Uint16 rows, Uint16 cols);
-STATIC void derivative_x_y_neon(short int *smoothedim, int rows, int cols, short int *delta_x, short int *delta_y, short int *percentage);
+STATIC void gaussian_smooth_neon(unsigned char *image, short int *smoothedim, Uint16 rows, Uint16 cols);
+STATIC void derivative_x_y_neon(short int *smoothedim, int rows, int cols, short int *delta_x, short int *delta_y,
+                                short int *percentage);
 STATIC void magnitude_x_y_neon(short int *delta_x, short int *delta_y, int rows, int cols, short int *magnitude);
 STATIC void magnitude_x_y_sq_neon(short int *delta_x, short int *delta_y, int rows, int cols, int *magnitude_square);
 STATIC void magnitude_x_y_rt(int rows, int cols, int *magnitude_square, short int *magnitude);
 
 /* Used GPP functions */
-STATIC void gaussian_smooth(unsigned char *image, short int* smoothedim, int rows, int cols);
+STATIC void gaussian_smooth(unsigned char *image, short int *smoothedim, int rows, int cols);
 STATIC void make_gaussian_kernel(float sigma, float **kernel, int *windowsize);
-STATIC void derivative_x_y(short int *smoothedim, int rows, int cols, short int *delta_x, short int *delta_y, short int *percentage);
+STATIC void derivative_x_y(short int *smoothedim, int rows, int cols, short int *delta_x, short int *delta_y,
+                           short int *percentage);
 STATIC void magnitude_x_y(short int *delta_x, short int *delta_y, int rows, int cols, short int *magnitude);
 STATIC double angle_radians(double x, double y);
 
@@ -137,201 +142,189 @@ STATIC double angle_radians(double x, double y);
  *  @modif  None
  *  ============================================================================
  */
-NORMAL_API DSP_STATUS canny_edge_Create (	IN Char8 * dspExecutable,
-											IN Char8 * strImage,
-											IN Uint8   processorId)
+NORMAL_API DSP_STATUS canny_edge_Create(IN Char8 *dspExecutable,
+                                        IN Char8 *strImage,
+                                        IN Uint8   processorId)
 {
-    DSP_STATUS      status     = DSP_SOK;
-    SMAPOOL_Attrs   poolAttrs;
-    Uint16          i, j;
+  DSP_STATUS      status     = DSP_SOK;
+  SMAPOOL_Attrs   poolAttrs;
+  Uint16          i, j;
 
-    VPRINT("Entered canny_edge_Create ()\n") ;
-    sem_init(&sem,0,0);
+  VPRINT("Entered canny_edge_Create ()\n") ;
+  sem_init(&sem, 0, 0);
 
-    /*
-     *  Create and initialize the proc object.
-     */
-    status = PROC_setup (NULL) ;
+  /*
+   *  Create and initialize the proc object.
+   */
+  status = PROC_setup(NULL) ;
 
-    if (DSP_FAILED (status)) 
-	{
-        fprintf(stderr, "PROC_setup () failed. Status = [0x%x]\n", (int)status);
-        return status;
-    }
-
-    /*
-     *  Attach the Dsp with which the transfers have to be done.
-     */
-    status = PROC_attach (processorId, NULL) ;
-    if (DSP_FAILED (status)) 
-	{
-        fprintf(stderr, "PROC_attach () failed. Status = [0x%x]\n", (int)status);
-        return status;
-    }
-
-    /*
-     *  Open the PGM image
-     */
-    VPRINT("Reading the image %s.\n", strImage);
-    if(read_pgm_image(strImage, &canny_edge_image, &canny_edge_rows, &canny_edge_cols) == 0)
-    {
-        fprintf(stderr, "Error reading the input image, %s.\n", strImage);
-        return DSP_EFAIL;
-    }
-
-    VPRINT("Start allocating buffer \n");
-    /* Set the buffer sizes based on image size */
-    buffer_sizes[0] = DSPLINK_ALIGN(sizeof(unsigned char) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN); //image
-    buffer_sizes[1] = DSPLINK_ALIGN(sizeof(short int) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN); //smoothedim
-    buffer_sizes[2] = DSPLINK_ALIGN(sizeof(short int) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN); //delta_x
-    buffer_sizes[3] = DSPLINK_ALIGN(sizeof(short int) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN); //delta_y
-    buffer_sizes[4] = DSPLINK_ALIGN(sizeof(int) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN); //magnitude
-    buffer_sizes[5] = DSPLINK_ALIGN(sizeof(short int), DSPLINK_BUF_ALIGN); // percentage
-
-    /*
-     *  Open the pool.
-     */
-    poolAttrs.bufSizes      = (Uint32 *) &buffer_sizes ;
-    poolAttrs.numBuffers    = (Uint32 *) &pool_sizes ;
-    poolAttrs.numBufPools   = NUM_BUF_SIZES ;
-    poolAttrs.exactMatchReq = TRUE ;
-    status = POOL_open (POOL_makePoolId(processorId, SAMPLE_POOL_ID), &poolAttrs) ;
-    if (DSP_FAILED (status)) 
-	{
-        fprintf(stderr, "POOL_open () failed. Status = [0x%x]\n", (int)status);
-        return status;
-    }
-    else {
-        VPRINT("POOL_open () successfull!\n");
-    }
-
-    /*
-     *  Go through all buffers to initialize them
-     */
-    for(i = 0; i < NUM_BUF_SIZES; i++) {
-        for(j = 0; j < pool_sizes[i]; j++) {
-            /* Allocate the buffer */
-            status = POOL_alloc (POOL_makePoolId(processorId, SAMPLE_POOL_ID),
-                                 (Void **) &buffers[i][j],
-                                 buffer_sizes[i]) ;
-            if (DSP_FAILED (status)) 
-            {
-                fprintf(stderr, "POOL_alloc() DataBuf failed. Status = [0x%x]\n", (int)status);
-                return status;
-            }
-
-            /* Get the translated DSP address to be sent to the DSP. */
-            status = POOL_translateAddr (
-                                   POOL_makePoolId(processorId, SAMPLE_POOL_ID),
-                                         &dsp_buffers[i][j],
-                                         AddrType_Dsp,
-                                         (Void *) buffers[i][j],
-                                         AddrType_Usr) ;
-
-            if (DSP_FAILED (status)) 
-            {
-                fprintf (stderr, "POOL_translateAddr () DataBuf failed. Status = [0x%x]\n", (int)status);
-                return status;
-            }
-        }
-    }
-
-    /*
-     *  Register for notification that the DSP-side application setup is
-     *  complete.
-     */
-    status = NOTIFY_register (processorId,
-                              canny_edge_IPS_ID,
-                              canny_edge_IPS_EVENTNO,
-                              (FnNotifyCbck) canny_edge_Notify,
-                              0/* vladms XFER_SemPtr*/) ;
-    if (DSP_FAILED (status)) 
-	{
-        fprintf(stderr, "NOTIFY_register () failed Status = [0x%x]\n", (int)status);
-        return status;
-    }
-
-    /*
-     *  Load the executable on the DSP.
-     */
-    status = PROC_load (processorId, dspExecutable, 0, NULL) ;
-    if (DSP_FAILED (status)) {
-        fprintf(stderr, "PROC_load () failed. Status = [0x%x]\n", (int)status);
-        return status;
-    }
-
-    /*
-     *  Start execution on DSP.
-     */
-    status = PROC_start (processorId) ;
-    if (DSP_FAILED (status)) {
-        fprintf(stderr, "PROC_start () failed. Status = [0x%x]\n", (int)status);
-        return status;
-    }
-
-    /*
-     *  Wait for the DSP-side application to indicate that it has completed its
-     *  setup. The DSP-side application sends notification of the IPS event
-     *  when it is ready to proceed with further execution of the application.
-     */
-    sem_wait(&sem);
-
-    /*
-     * Send the image cols and rows
-     */
-    status = NOTIFY_notify (processorId,
-                            canny_edge_IPS_ID,
-                            canny_edge_IPS_EVENTNO,
-                            (Uint32) canny_edge_cols);
-    if (DSP_FAILED (status)) 
-    {
-        fprintf(stderr, "NOTIFY_notify () DataBuf failed. Status = [0x%x]\n", (int)status);
-        return status;
-    }
-
-    status = NOTIFY_notify (processorId,
-                            canny_edge_IPS_ID,
-                            canny_edge_IPS_EVENTNO,
-                            (Uint32) canny_edge_rows);
-    if (DSP_FAILED (status)) 
-    {
-        fprintf(stderr, "NOTIFY_notify () DataBuf failed. Status = [0x%x]\n", (int)status);
-        return status;
-    }
-
-
-    /*
-     *  Go through all buffers to initialize them on the DSP
-     */
-    for(i = 0; i < NUM_BUF_SIZES; i++) {
-        for(j = 0; j < pool_sizes[i]; j++) {
-            /* Send DSP address of the buffer to the DSP */
-            status = NOTIFY_notify (processorId,
-                                    canny_edge_IPS_ID,
-                                    canny_edge_IPS_EVENTNO,
-                                    (Uint32) dsp_buffers[i][j]);
-            if (DSP_FAILED (status)) 
-        	{
-                fprintf(stderr, "NOTIFY_notify () DataBuf failed. Status = [0x%x]\n", (int)status);
-                return status;
-            }
-
-            /* Send the size of the buffer to the DSP */
-            status = NOTIFY_notify (processorId,
-                                    canny_edge_IPS_ID,
-                                    canny_edge_IPS_EVENTNO,
-                                    (Uint32) buffer_sizes[i]);
-            if (DSP_FAILED (status)) 
-        	{
-                fprintf(stderr, "NOTIFY_notify () DataBuf failed. Status = [0x%x]\n", (int)status);
-                return status;
-            }
-        }
-    }
-
-
-    VPRINT("Leaving canny_edge_Create ()\n");
+  if (DSP_FAILED(status)) {
+    fprintf(stderr, "PROC_setup () failed. Status = [0x%x]\n", (int)status);
     return status;
+  }
+
+  /*
+   *  Attach the Dsp with which the transfers have to be done.
+   */
+  status = PROC_attach(processorId, NULL) ;
+  if (DSP_FAILED(status)) {
+    fprintf(stderr, "PROC_attach () failed. Status = [0x%x]\n", (int)status);
+    return status;
+  }
+
+  /*
+   *  Open the PGM image
+   */
+  VPRINT("Reading the image %s.\n", strImage);
+  if (read_pgm_image(strImage, &canny_edge_image, &canny_edge_rows, &canny_edge_cols) == 0) {
+    fprintf(stderr, "Error reading the input image, %s.\n", strImage);
+    return DSP_EFAIL;
+  }
+
+  VPRINT("Start allocating buffer \n");
+  /* Set the buffer sizes based on image size */
+  buffer_sizes[0] = DSPLINK_ALIGN(sizeof(unsigned char) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN); //image
+  buffer_sizes[1] = DSPLINK_ALIGN(sizeof(short int) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN); //smoothedim
+  buffer_sizes[2] = DSPLINK_ALIGN(sizeof(short int) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN); //delta_x
+  buffer_sizes[3] = DSPLINK_ALIGN(sizeof(short int) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN); //delta_y
+  buffer_sizes[4] = DSPLINK_ALIGN(sizeof(int) * canny_edge_rows * canny_edge_cols, DSPLINK_BUF_ALIGN); //magnitude
+  buffer_sizes[5] = DSPLINK_ALIGN(sizeof(short int), DSPLINK_BUF_ALIGN); // percentage
+
+  /*
+   *  Open the pool.
+   */
+  poolAttrs.bufSizes      = (Uint32 *) &buffer_sizes ;
+  poolAttrs.numBuffers    = (Uint32 *) &pool_sizes ;
+  poolAttrs.numBufPools   = NUM_BUF_SIZES ;
+  poolAttrs.exactMatchReq = TRUE ;
+  status = POOL_open(POOL_makePoolId(processorId, SAMPLE_POOL_ID), &poolAttrs) ;
+  if (DSP_FAILED(status)) {
+    fprintf(stderr, "POOL_open () failed. Status = [0x%x]\n", (int)status);
+    return status;
+  } else {
+    VPRINT("POOL_open () successfull!\n");
+  }
+
+  /*
+   *  Go through all buffers to initialize them
+   */
+  for (i = 0; i < NUM_BUF_SIZES; i++) {
+    for (j = 0; j < pool_sizes[i]; j++) {
+      /* Allocate the buffer */
+      status = POOL_alloc(POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                          (Void **) &buffers[i][j],
+                          buffer_sizes[i]) ;
+      if (DSP_FAILED(status)) {
+        fprintf(stderr, "POOL_alloc() DataBuf failed. Status = [0x%x]\n", (int)status);
+        return status;
+      }
+
+      /* Get the translated DSP address to be sent to the DSP. */
+      status = POOL_translateAddr(
+                 POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                 &dsp_buffers[i][j],
+                 AddrType_Dsp,
+                 (Void *) buffers[i][j],
+                 AddrType_Usr) ;
+
+      if (DSP_FAILED(status)) {
+        fprintf(stderr, "POOL_translateAddr () DataBuf failed. Status = [0x%x]\n", (int)status);
+        return status;
+      }
+    }
+  }
+
+  /*
+   *  Register for notification that the DSP-side application setup is
+   *  complete.
+   */
+  status = NOTIFY_register(processorId,
+                           canny_edge_IPS_ID,
+                           canny_edge_IPS_EVENTNO,
+                           (FnNotifyCbck) canny_edge_Notify,
+                           0/* vladms XFER_SemPtr*/) ;
+  if (DSP_FAILED(status)) {
+    fprintf(stderr, "NOTIFY_register () failed Status = [0x%x]\n", (int)status);
+    return status;
+  }
+
+  /*
+   *  Load the executable on the DSP.
+   */
+  status = PROC_load(processorId, dspExecutable, 0, NULL) ;
+  if (DSP_FAILED(status)) {
+    fprintf(stderr, "PROC_load () failed. Status = [0x%x]\n", (int)status);
+    return status;
+  }
+
+  /*
+   *  Start execution on DSP.
+   */
+  status = PROC_start(processorId) ;
+  if (DSP_FAILED(status)) {
+    fprintf(stderr, "PROC_start () failed. Status = [0x%x]\n", (int)status);
+    return status;
+  }
+
+  /*
+   *  Wait for the DSP-side application to indicate that it has completed its
+   *  setup. The DSP-side application sends notification of the IPS event
+   *  when it is ready to proceed with further execution of the application.
+   */
+  sem_wait(&sem);
+
+  /*
+   * Send the image cols and rows
+   */
+  status = NOTIFY_notify(processorId,
+                         canny_edge_IPS_ID,
+                         canny_edge_IPS_EVENTNO,
+                         (Uint32) canny_edge_cols);
+  if (DSP_FAILED(status)) {
+    fprintf(stderr, "NOTIFY_notify () DataBuf failed. Status = [0x%x]\n", (int)status);
+    return status;
+  }
+
+  status = NOTIFY_notify(processorId,
+                         canny_edge_IPS_ID,
+                         canny_edge_IPS_EVENTNO,
+                         (Uint32) canny_edge_rows);
+  if (DSP_FAILED(status)) {
+    fprintf(stderr, "NOTIFY_notify () DataBuf failed. Status = [0x%x]\n", (int)status);
+    return status;
+  }
+
+
+  /*
+   *  Go through all buffers to initialize them on the DSP
+   */
+  for (i = 0; i < NUM_BUF_SIZES; i++) {
+    for (j = 0; j < pool_sizes[i]; j++) {
+      /* Send DSP address of the buffer to the DSP */
+      status = NOTIFY_notify(processorId,
+                             canny_edge_IPS_ID,
+                             canny_edge_IPS_EVENTNO,
+                             (Uint32) dsp_buffers[i][j]);
+      if (DSP_FAILED(status)) {
+        fprintf(stderr, "NOTIFY_notify () DataBuf failed. Status = [0x%x]\n", (int)status);
+        return status;
+      }
+
+      /* Send the size of the buffer to the DSP */
+      status = NOTIFY_notify(processorId,
+                             canny_edge_IPS_ID,
+                             canny_edge_IPS_EVENTNO,
+                             (Uint32) buffer_sizes[i]);
+      if (DSP_FAILED(status)) {
+        fprintf(stderr, "NOTIFY_notify () DataBuf failed. Status = [0x%x]\n", (int)status);
+        return status;
+      }
+    }
+  }
+
+
+  VPRINT("Leaving canny_edge_Create ()\n");
+  return status;
 }
 
 
@@ -339,12 +332,12 @@ NORMAL_API DSP_STATUS canny_edge_Create (	IN Char8 * dspExecutable,
 
 long long get_usec(void);
 
-long long get_usec(void) 
+long long get_usec(void)
 {
   long long r;
   struct timeval t;
-  gettimeofday(&t,NULL);
-  r=t.tv_sec*1000000+t.tv_usec;
+  gettimeofday(&t, NULL);
+  r = t.tv_sec * 1000000 + t.tv_usec;
   return r;
 }
 
@@ -357,114 +350,112 @@ long long get_usec(void)
  *  @modif  None
  *  ============================================================================
  */
-NORMAL_API DSP_STATUS canny_edge_Execute (Uint8 processorId, IN Char8 * strImage)
+NORMAL_API DSP_STATUS canny_edge_Execute(Uint8 processorId, IN Char8 *strImage)
 {
-    DSP_STATUS  status = DSP_SOK;
-    long long start_time;
-    unsigned char *image = (unsigned char *)buffers[0][0];
-    short int *smoothedim = (short int *)buffers[1][0];
-    short int *delta_x = (short int *)buffers[2][0];
-    short int *delta_y = (short int *)buffers[3][0];
-    short int *magnitude = (short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
-    unsigned char *nms = (unsigned char *)malloc(sizeof(unsigned char) * canny_edge_rows * canny_edge_cols);
-    unsigned char *edge = (unsigned char *)malloc(sizeof(unsigned char) * canny_edge_rows * canny_edge_cols);
-    short int *percentage = (short int *)buffers[5][0]; 
-    char outfilename[128];    /* Name of the output "edge" image */
+  DSP_STATUS  status = DSP_SOK;
+  long long start_time;
+  unsigned char *image = (unsigned char *)buffers[0][0];
+  short int *smoothedim = (short int *)buffers[1][0];
+  short int *delta_x = (short int *)buffers[2][0];
+  short int *delta_y = (short int *)buffers[3][0];
+  short int *magnitude = (short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
+  unsigned char *nms = (unsigned char *)malloc(sizeof(unsigned char) * canny_edge_rows * canny_edge_cols);
+  unsigned char *edge = (unsigned char *)malloc(sizeof(unsigned char) * canny_edge_rows * canny_edge_cols);
+  short int *percentage = (short int *)buffers[5][0];
+  char outfilename[128];    /* Name of the output "edge" image */
 #if VERIFY
-    int i, windowsize;
-    float *kernel;
+  int i, windowsize;
+  float *kernel;
 #endif
-    /* Distribute PERCENTAGE_GPP of the rows to GPP and 100-PERCENTAGE_GPP to the DSP */
+  /* Distribute PERCENTAGE_GPP of the rows to GPP and 100-PERCENTAGE_GPP to the DSP */
 
-    VPRINT("Entered canny_edge_Execute ()\n");
+  VPRINT("Entered canny_edge_Execute ()\n");
 
-    /* Copy the open image (since this is generated by PGM IO) */
-    memcpy(image, canny_edge_image, buffer_sizes[0]);
+  /* Copy the open image (since this is generated by PGM IO) */
+  memcpy(image, canny_edge_image, buffer_sizes[0]);
 
-    /* Start the timer */
-    start_time = get_usec();
+  /* Start the timer */
+  start_time = get_usec();
 
 #if DO_WRITEBACK
-    /* Do a writeback test */
-    VPRINT(" Starting writeback\r\n");
-    canny_edge_Writeback(image, canny_edge_rows, canny_edge_cols, processorId);
+  /* Do a writeback test */
+  VPRINT(" Starting writeback\r\n");
+  canny_edge_Writeback(image, canny_edge_rows, canny_edge_cols, processorId);
 #endif
 
 #if VERIFY
-    /* Verify pre-computed (harcoded) kernel values */
-    VPRINT(" Verifying pre-computed kernel values.. \r \n");
-    make_gaussian_kernel(SIGMA, &kernel, &windowsize);
-    for (i = 0; i < windowsize; i++)
-    {
-        if(gaussian_kernel[i] != kernel[i]){
-            fprintf(stderr, "Incorrect kernel value! Expected %f, Got %f (i: %d)\r\n", kernel[i], gaussian_kernel[i], i);
-        }
+  /* Verify pre-computed (harcoded) kernel values */
+  VPRINT(" Verifying pre-computed kernel values.. \r \n");
+  make_gaussian_kernel(SIGMA, &kernel, &windowsize);
+  for (i = 0; i < windowsize; i++) {
+    if (gaussian_kernel[i] != kernel[i]) {
+      fprintf(stderr, "Incorrect kernel value! Expected %f, Got %f (i: %d)\r\n", kernel[i], gaussian_kernel[i], i);
     }
+  }
 
-    if(DSP_SUCCEEDED(status)) {
-        VPRINT("Precomputed kernel values are correct!\r\n");
-    }
+  if (DSP_SUCCEEDED(status)) {
+    VPRINT("Precomputed kernel values are correct!\r\n");
+  }
 #endif
 
-    /* Do the guassian smoothing */
-    VPRINT(" Starting guassian smoothing\r\n");
+  /* Do the guassian smoothing */
+  VPRINT(" Starting guassian smoothing\r\n");
 #if GAUSSIAN_DSP
-    canny_edge_Gaussian(image, canny_edge_rows, canny_edge_cols, smoothedim, processorId);
+  canny_edge_Gaussian(image, canny_edge_rows, canny_edge_cols, smoothedim, processorId);
 #elif GUASSIAN_NEON
-    gaussian_smooth_neon(image, smoothedim, canny_edge_rows, canny_edge_cols);
+  gaussian_smooth_neon(image, smoothedim, canny_edge_rows, canny_edge_cols);
 #else
-    gaussian_smooth(image, smoothedim, canny_edge_rows, canny_edge_cols);
+  gaussian_smooth(image, smoothedim, canny_edge_rows, canny_edge_cols);
 #endif
 
 // derivative_x_y_neon(smoothedim, canny_edge_rows, canny_edge_cols, delta_x, delta_y, percentage);
-    /* Calculate the derivatives */
-    VPRINT(" Starting derivative x, y\r\n");
-    *percentage = DERIVATIVE_PERCENTAGE;
+  /* Calculate the derivatives */
+  VPRINT(" Starting derivative x, y\r\n");
+  *percentage = DERIVATIVE_PERCENTAGE;
 #if DERIVATIVE_PARALLEL
-    canny_edge_Derivative(smoothedim, canny_edge_rows, canny_edge_cols, delta_x, delta_y, percentage, processorId);
+  canny_edge_Derivative(smoothedim, canny_edge_rows, canny_edge_cols, delta_x, delta_y, percentage, processorId);
 #else
-    derivative_x_y(smoothedim, canny_edge_rows, canny_edge_cols, delta_x, delta_y, percentage);
+  derivative_x_y(smoothedim, canny_edge_rows, canny_edge_cols, delta_x, delta_y, percentage);
 #endif
 
-    /* Compute the magnitude */
-    VPRINT(" Starting magnitude x, y\r\n");
+  /* Compute the magnitude */
+  VPRINT(" Starting magnitude x, y\r\n");
 #if MAGNITUDE_DSP
-    canny_edge_Magnitude(delta_x, delta_y, canny_edge_rows, canny_edge_cols, magnitude, processorId);
+  canny_edge_Magnitude(delta_x, delta_y, canny_edge_rows, canny_edge_cols, magnitude, processorId);
 #elif MAGNITUDE_NEON
-    magnitude_x_y_neon(delta_x, delta_y, canny_edge_rows, canny_edge_cols, magnitude);
+  magnitude_x_y_neon(delta_x, delta_y, canny_edge_rows, canny_edge_cols, magnitude);
 #else
-    magnitude_x_y(delta_x, delta_y, canny_edge_rows, canny_edge_cols, magnitude);
+  magnitude_x_y(delta_x, delta_y, canny_edge_rows, canny_edge_cols, magnitude);
 #endif
 
-    /* Do the Non maximal suppression */
-    VPRINT(" Starting non maximal suppression \r\n");
-    non_max_supp(magnitude, delta_x, delta_y, canny_edge_rows, canny_edge_cols, nms);
+  /* Do the Non maximal suppression */
+  VPRINT(" Starting non maximal suppression \r\n");
+  non_max_supp(magnitude, delta_x, delta_y, canny_edge_rows, canny_edge_cols, nms);
 
-    /* Apply the hysteresis */
-    VPRINT(" Starting hysteresis \r\n");
-    apply_hysteresis(magnitude, nms, canny_edge_rows, canny_edge_cols, TLOW, THIGH, edge);
+  /* Apply the hysteresis */
+  VPRINT(" Starting hysteresis \r\n");
+  apply_hysteresis(magnitude, nms, canny_edge_rows, canny_edge_cols, TLOW, THIGH, edge);
 
-    /* Stop the timer and return */
-    printf("Canny edge took %lld us.\n", (get_usec() - start_time));
+  /* Stop the timer and return */
+  printf("Canny edge took %lld us.\n", (get_usec() - start_time));
 
-    /* Save the image */
-    sprintf(outfilename, "%s_out.pgm", strImage);
-    if(write_pgm_image(outfilename, edge, canny_edge_rows, canny_edge_cols, "", 255) == 0)
-    {
-        fprintf(stderr, "Error writing the edge image, %s.\n", outfilename);
-        status = DSP_EFAIL;
-    }
+  /* Save the image */
+  sprintf(outfilename, "%s_out.pgm", strImage);
+  if (write_pgm_image(outfilename, edge, canny_edge_rows, canny_edge_cols, "", 255) == 0) {
+    fprintf(stderr, "Error writing the edge image, %s.\n", outfilename);
+    status = DSP_EFAIL;
+  }
 
-    /* Free buffers */
-    free(magnitude);
-    free(nms);
-    free(edge);
+  /* Free buffers */
+  free(magnitude);
+  free(nms);
+  free(edge);
 #if VERIFY
-    free(kernel);
+  free(kernel);
 #endif
 
 
-    return status;
+  return status;
 }
 
 
@@ -480,87 +471,86 @@ NORMAL_API DSP_STATUS canny_edge_Execute (Uint8 processorId, IN Char8 * strImage
  *  @modif  None
  *  ============================================================================
  */
-NORMAL_API Void canny_edge_Delete (Uint8 processorId)
+NORMAL_API Void canny_edge_Delete(Uint8 processorId)
 {
-    DSP_STATUS status    = DSP_SOK;
-    Uint16 i, j;
+  DSP_STATUS status    = DSP_SOK;
+  Uint16 i, j;
 
-	VPRINT("Entered canny_edge_Delete ()\n") ;
+  VPRINT("Entered canny_edge_Delete ()\n") ;
 
-    /* Send DSP to stop */
-    status = NOTIFY_notify (processorId,
-                            canny_edge_IPS_ID,
-                            canny_edge_IPS_EVENTNO,
-                            (Uint32) canny_edge_DELETE);
-    if (DSP_FAILED (status)) 
-    {
-        fprintf(stderr, "NOTIFY_notify () DataBuf failed. Status = [0x%x]\n", (int)status);
+  /* Send DSP to stop */
+  status = NOTIFY_notify(processorId,
+                         canny_edge_IPS_ID,
+                         canny_edge_IPS_EVENTNO,
+                         (Uint32) canny_edge_DELETE);
+  if (DSP_FAILED(status)) {
+    fprintf(stderr, "NOTIFY_notify () DataBuf failed. Status = [0x%x]\n", (int)status);
+  }
+
+
+  /* Free the canny edge image */
+  free(canny_edge_image);
+  //free(gaussian_kernel);
+
+  /*
+   *  Stop execution on DSP.
+   */
+  status = PROC_stop(processorId) ;
+  if (DSP_FAILED(status)) {
+    fprintf(stderr, "PROC_stop () failed. Status = [0x%x]\n", (int)status);
+  }
+
+  /*
+   *  Unregister for notification of event registered earlier.
+   */
+  status = NOTIFY_unregister(processorId,
+                             canny_edge_IPS_ID,
+                             canny_edge_IPS_EVENTNO,
+                             (FnNotifyCbck) canny_edge_Notify,
+                             0/* vladms canny_edge_SemPtr*/) ;
+  if (DSP_FAILED(status)) {
+    fprintf(stderr, "NOTIFY_unregister () failed Status = [0x%x]\n", (int)status);
+  }
+
+  /*
+   *  Free the memory allocated for the data buffer.
+   */
+  for (i = 0; i < NUM_BUF_SIZES; i++) {
+    for (j = 0; j < pool_sizes[i]; j++) {
+      status = POOL_free(POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                         (Void *) buffers[i][j],
+                         buffer_sizes[i]) ;
+      if (DSP_FAILED(status)) {
+        fprintf(stderr, "POOL_free () DataBuf failed. Status = [0x%x]\n", (int)status);
+      }
     }
+  }
 
+  /*
+   *  Close the pool
+   */
+  status = POOL_close(POOL_makePoolId(processorId, SAMPLE_POOL_ID)) ;
+  if (DSP_FAILED(status)) {
+    fprintf(stderr, "POOL_close () failed. Status = [0x%x]\n", (int)status);
+  }
 
-    /* Free the canny edge image */
-    free(canny_edge_image);
-    //free(gaussian_kernel);
+  /*
+   *  Detach from the processor
+   */
+  status = PROC_detach(processorId) ;
+  if (DSP_FAILED(status)) {
+    fprintf(stderr, "PROC_detach () failed. Status = [0x%x]\n", (int)status);
+  }
 
-    /*
-     *  Stop execution on DSP.
-     */
-    status = PROC_stop (processorId) ;
-    if (DSP_FAILED (status)) {
-        fprintf(stderr, "PROC_stop () failed. Status = [0x%x]\n", (int)status);
-    }
+  /*
+   *  Destroy the PROC object.
+   */
+  status = PROC_destroy() ;
+  if (DSP_FAILED(status)) {
+    fprintf(stderr, "PROC_destroy () failed. Status = [0x%x]\n", (int)status);
+  }
 
-    /*
-     *  Unregister for notification of event registered earlier.
-     */
-    status = NOTIFY_unregister (processorId,
-                                   canny_edge_IPS_ID,
-                                   canny_edge_IPS_EVENTNO,
-                                   (FnNotifyCbck) canny_edge_Notify,
-                                   0/* vladms canny_edge_SemPtr*/) ;
-    if (DSP_FAILED (status)) {
-        fprintf(stderr, "NOTIFY_unregister () failed Status = [0x%x]\n", (int)status);
-    }
-
-    /*
-     *  Free the memory allocated for the data buffer.
-     */
-    for(i = 0; i < NUM_BUF_SIZES; i++) {
-        for(j = 0; j < pool_sizes[i]; j++) {
-            status = POOL_free (POOL_makePoolId(processorId, SAMPLE_POOL_ID),
-                                   (Void *) buffers[i][j],
-                                   buffer_sizes[i]) ;
-            if (DSP_FAILED (status)) {
-                fprintf(stderr, "POOL_free () DataBuf failed. Status = [0x%x]\n", (int)status);
-            }
-        }
-    }
-
-    /*
-     *  Close the pool
-     */
-    status = POOL_close (POOL_makePoolId(processorId, SAMPLE_POOL_ID)) ;
-    if (DSP_FAILED (status)) {
-        fprintf(stderr, "POOL_close () failed. Status = [0x%x]\n", (int)status);
-    }
-
-    /*
-     *  Detach from the processor
-     */
-    status = PROC_detach  (processorId) ;
-    if (DSP_FAILED (status)) {
-        fprintf(stderr, "PROC_detach () failed. Status = [0x%x]\n", (int)status);
-    }
-
-    /*
-     *  Destroy the PROC object.
-     */
-    status = PROC_destroy () ;
-    if (DSP_FAILED (status)) {
-        fprintf(stderr, "PROC_destroy () failed. Status = [0x%x]\n", (int)status);
-    }
-
-    VPRINT("Leaving canny_edge_Delete ()\n");
+  VPRINT("Leaving canny_edge_Delete ()\n");
 }
 
 
@@ -572,33 +562,29 @@ NORMAL_API Void canny_edge_Delete (Uint8 processorId)
  *  @modif  None
  *  ============================================================================
  */
-NORMAL_API Void canny_edge_Main (IN Char8 * dspExecutable, IN Char8 * strImage)
+NORMAL_API Void canny_edge_Main(IN Char8 *dspExecutable, IN Char8 *strImage)
 {
-    DSP_STATUS status       = DSP_SOK ;
+  DSP_STATUS status       = DSP_SOK ;
 
-	VPRINT("========== Application : canny_edge ==========\n");
+  VPRINT("========== Application : canny_edge ==========\n");
 
-    if (dspExecutable != NULL && strImage != NULL) 
-	{
-        /*
-         *  Specify the dsp executable file name and the buffer size for
-         *  canny_edge creation phase.
-         */
-        status = canny_edge_Create(dspExecutable, strImage, ID_PROCESSOR);
+  if (dspExecutable != NULL && strImage != NULL) {
+    /*
+     *  Specify the dsp executable file name and the buffer size for
+     *  canny_edge creation phase.
+     */
+    status = canny_edge_Create(dspExecutable, strImage, ID_PROCESSOR);
 
-        if (DSP_SUCCEEDED(status)) 
-		{
-            status = canny_edge_Execute(ID_PROCESSOR, strImage);
-        }
-
-         canny_edge_Delete(ID_PROCESSOR);
-    }
-    else 
-	{
-        fprintf(stderr, "ERROR! Invalid arguments specified for canny_edge application\n");
+    if (DSP_SUCCEEDED(status)) {
+      status = canny_edge_Execute(ID_PROCESSOR, strImage);
     }
 
-    VPRINT("====================================================\n");
+    canny_edge_Delete(ID_PROCESSOR);
+  } else {
+    fprintf(stderr, "ERROR! Invalid arguments specified for canny_edge application\n");
+  }
+
+  VPRINT("====================================================\n");
 }
 
 /** ----------------------------------------------------------------------------
@@ -611,22 +597,21 @@ NORMAL_API Void canny_edge_Main (IN Char8 * dspExecutable, IN Char8 * strImage)
  *  @modif  None
  *  ----------------------------------------------------------------------------
  */
-STATIC Void canny_edge_Notify (Uint32 eventNo, Pvoid arg, Pvoid info)
+STATIC Void canny_edge_Notify(Uint32 eventNo, Pvoid arg, Pvoid info)
 {
-    VPRINT("Notification event: %lu, info: %8d \r\n", eventNo, (int)info);
-    /* Post the semaphore for initialization. */
-    if((int)info == canny_edge_INIT) 
-	{
-        sem_post(&sem);
-    } else if((int)info == canny_edge_WRITEBACK) {
-        sem_post(&sem);
-    } else if((int)info == canny_edge_GAUSSIAN) {
-        sem_post(&sem);
-    } else if((int)info == canny_edge_DERIVATIVE) {
-        sem_post(&sem);
-    } else if((int)info == canny_edge_MAGNITUDE) {
-        sem_post(&sem);
-    }
+  VPRINT("Notification event: %lu, info: %8d \r\n", eventNo, (int)info);
+  /* Post the semaphore for initialization. */
+  if ((int)info == canny_edge_INIT) {
+    sem_post(&sem);
+  } else if ((int)info == canny_edge_WRITEBACK) {
+    sem_post(&sem);
+  } else if ((int)info == canny_edge_GAUSSIAN) {
+    sem_post(&sem);
+  } else if ((int)info == canny_edge_DERIVATIVE) {
+    sem_post(&sem);
+  } else if ((int)info == canny_edge_MAGNITUDE) {
+    sem_post(&sem);
+  }
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////
@@ -637,213 +622,214 @@ STATIC Void canny_edge_Notify (Uint32 eventNo, Pvoid arg, Pvoid info)
 STATIC Void canny_edge_Writeback(unsigned char *image, int rows, int cols, Uint8 processorId)
 {
 #if VERIFY
-    int i, status;
+  int i, status;
 #endif
 
-    /* Send the image */
-    POOL_writeback (POOL_makePoolId(processorId, SAMPLE_POOL_ID),
-                    image,
-                    sizeof(unsigned char) * rows * cols);
-    NOTIFY_notify (processorId, canny_edge_IPS_ID, canny_edge_IPS_EVENTNO, canny_edge_WRITEBACK);
-    VPRINT("  Writeback send, waiting for response...\r\n");
+  /* Send the image */
+  POOL_writeback(POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                 image,
+                 sizeof(unsigned char) * rows * cols);
+  NOTIFY_notify(processorId, canny_edge_IPS_ID, canny_edge_IPS_EVENTNO, canny_edge_WRITEBACK);
+  VPRINT("  Writeback send, waiting for response...\r\n");
 
-    /* Wait for the response */
-    sem_wait(&sem);
+  /* Wait for the response */
+  sem_wait(&sem);
 
-    /* Invalidate the result */
-    POOL_invalidate(POOL_makePoolId(processorId, SAMPLE_POOL_ID),
-                    image,
-                    sizeof(unsigned char) * rows * cols);
+  /* Invalidate the result */
+  POOL_invalidate(POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                  image,
+                  sizeof(unsigned char) * rows * cols);
 
-    /* Check if the result is correct */
+  /* Check if the result is correct */
 #if VERIFY
-    status = DSP_SOK;
-    for(i = 0; i < (rows * cols); i++) {
-        canny_edge_image[i]++;
-        if(image[i] != canny_edge_image[i]) {
-            fprintf(stderr, "Got incorrect image back! Expected %d, Got %d (i: %d)\r\n", canny_edge_image[i], image[i], i);
-            status = DSP_EFAIL;
-        }
+  status = DSP_SOK;
+  for (i = 0; i < (rows * cols); i++) {
+    canny_edge_image[i]++;
+    if (image[i] != canny_edge_image[i]) {
+      fprintf(stderr, "Got incorrect image back! Expected %d, Got %d (i: %d)\r\n", canny_edge_image[i], image[i], i);
+      status = DSP_EFAIL;
     }
+  }
 
-    if(DSP_SUCCEEDED(status))
-        VPRINT("Writeback was succesfull!\r\n");
+  if (DSP_SUCCEEDED(status)) {
+    VPRINT("Writeback was succesfull!\r\n");
+  }
 #endif
 }
 
 STATIC Void canny_edge_Gaussian(unsigned char *image, int rows, int cols, short int *smoothedim, Uint8 processorId)
 {
 #if VERIFY
-    int i;
-    int status = DSP_SOK;
-    short int *verify_smoothedim = (short int *) malloc(sizeof(short int) * rows * cols);
+  int i;
+  int status = DSP_SOK;
+  short int *verify_smoothedim = (short int *) malloc(sizeof(short int) * rows * cols);
 #endif
 
-    POOL_writeback (POOL_makePoolId(processorId, SAMPLE_POOL_ID),
-                    image,
-                    buffer_sizes[0]);
+  POOL_writeback(POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                 image,
+                 buffer_sizes[0]);
 
-    /* Notify DSP */
-    NOTIFY_notify (processorId, canny_edge_IPS_ID, canny_edge_IPS_EVENTNO, canny_edge_GAUSSIAN);
-    VPRINT("  DSP_Gaussian send, waiting for response...\r\n");
+  /* Notify DSP */
+  NOTIFY_notify(processorId, canny_edge_IPS_ID, canny_edge_IPS_EVENTNO, canny_edge_GAUSSIAN);
+  VPRINT("  DSP_Gaussian send, waiting for response...\r\n");
 
-     /* Wait for the response */
-    sem_wait(&sem);
+  /* Wait for the response */
+  sem_wait(&sem);
 
-    /* Invalidate the result */
-    POOL_invalidate(POOL_makePoolId(processorId, SAMPLE_POOL_ID),
-                    smoothedim,
-                    buffer_sizes[1]);
-    /* Check if the result is correct */
+  /* Invalidate the result */
+  POOL_invalidate(POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                  smoothedim,
+                  buffer_sizes[1]);
+  /* Check if the result is correct */
 #if VERIFY
-    /* Verify gaussian smooth dsp using the GPP code */
-    gaussian_smooth(image, verify_smoothedim, canny_edge_rows, canny_edge_cols);
+  /* Verify gaussian smooth dsp using the GPP code */
+  gaussian_smooth(image, verify_smoothedim, canny_edge_rows, canny_edge_cols);
 
-    /* Check if it matches */
-    for(i = 0; i < rows*cols; i++) {
-        if(smoothedim[i] != verify_smoothedim[i]) {
-            fprintf(stderr, "Got incorrect guassian smooth result back! Expected %d, Got %d (i: %d)\r\n", verify_smoothedim[i], smoothedim[i], i);
-            status = DSP_EFAIL;
-        }
+  /* Check if it matches */
+  for (i = 0; i < rows * cols; i++) {
+    if (smoothedim[i] != verify_smoothedim[i]) {
+      fprintf(stderr, "Got incorrect guassian smooth result back! Expected %d, Got %d (i: %d)\r\n", verify_smoothedim[i],
+              smoothedim[i], i);
+      status = DSP_EFAIL;
     }
+  }
 
-    if(DSP_SUCCEEDED(status)) {
-        VPRINT("Execution of canny_edge_Gaussian was succesfull!\r\n");
-    }
-    else {
-        fprintf(stderr, "Execution of canny_edge_Gaussian FAILED!\r\n");
-    }
-    free(verify_smoothedim);
+  if (DSP_SUCCEEDED(status)) {
+    VPRINT("Execution of canny_edge_Gaussian was succesfull!\r\n");
+  } else {
+    fprintf(stderr, "Execution of canny_edge_Gaussian FAILED!\r\n");
+  }
+  free(verify_smoothedim);
 #endif
 }
 
-STATIC Void canny_edge_Derivative(short int *smoothedim, int rows, int cols, short int *delta_x, short int *delta_y, short int *percentage, Uint8 processorId)
+STATIC Void canny_edge_Derivative(short int *smoothedim, int rows, int cols, short int *delta_x, short int *delta_y,
+                                  short int *percentage, Uint8 processorId)
 {
 #if VERIFY
-    int i;
-    int status = DSP_SOK;
-    short int *verify_delta_x = (short int *) malloc(sizeof(short int) * rows * cols);
-    short int *verify_delta_y = (short int *) malloc(sizeof(short int) * rows * cols);
+  int i;
+  int status = DSP_SOK;
+  short int *verify_delta_x = (short int *) malloc(sizeof(short int) * rows * cols);
+  short int *verify_delta_y = (short int *) malloc(sizeof(short int) * rows * cols);
 #endif
 
-    /* Send smoothedim */
-    POOL_writeback (POOL_makePoolId(processorId, SAMPLE_POOL_ID),
-                    smoothedim,
-                    buffer_sizes[1]);
-    POOL_writeback (POOL_makePoolId(processorId, SAMPLE_POOL_ID),
-                    percentage,
-                    buffer_sizes[5]);
+  /* Send smoothedim */
+  POOL_writeback(POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                 smoothedim,
+                 buffer_sizes[1]);
+  POOL_writeback(POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                 percentage,
+                 buffer_sizes[5]);
 
-    /* Notify DSP */
-    NOTIFY_notify (processorId, canny_edge_IPS_ID, canny_edge_IPS_EVENTNO, canny_edge_DERIVATIVE);
-    VPRINT("  canny_edge_Derivative send, waiting for response...\r\n");
+  /* Notify DSP */
+  NOTIFY_notify(processorId, canny_edge_IPS_ID, canny_edge_IPS_EVENTNO, canny_edge_DERIVATIVE);
+  VPRINT("  canny_edge_Derivative send, waiting for response...\r\n");
 #if DERIVATIVE_NEON
-    derivative_x_y_neon(smoothedim, rows, cols, delta_x, delta_y, percentage)
+  derivative_x_y_neon(smoothedim, rows, cols, delta_x, delta_y, percentage)
 #else
-    derivative_x_y(smoothedim, rows, cols, delta_x, delta_y, percentage);
+  derivative_x_y(smoothedim, rows, cols, delta_x, delta_y, percentage);
 #endif
 
-     /* Wait for the response */
-    sem_wait(&sem);
+  /* Wait for the response */
+  sem_wait(&sem);
 
-    /* Invalidate the result */
-    POOL_invalidate(POOL_makePoolId(processorId, SAMPLE_POOL_ID),
-                    delta_x,
-                    buffer_sizes[2]);
-    POOL_invalidate(POOL_makePoolId(processorId, SAMPLE_POOL_ID),
-                    delta_y,
-                    buffer_sizes[3]);
+  /* Invalidate the result */
+  POOL_invalidate(POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                  delta_x,
+                  buffer_sizes[2]);
+  POOL_invalidate(POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                  delta_y,
+                  buffer_sizes[3]);
 
 #if VERIFY
-    /* verify with GPP function */
-    *percentage = 100;
-    derivative_x_y(smoothedim, rows, cols, verify_delta_x, verify_delta_y, percentage);
-    
-    /* Check for delta_x*/
-    for(i = 0; i < rows*cols; i++) {
-        if(delta_x[i] != verify_delta_x[i]) {
-            //fprintf(stderr, "Got incorrect delta_x result back! Expected %d, Got %d (i: %d)\r\n", verify_delta_x[i], delta_x[i], i);
-            status = DSP_EFAIL;
-        }
-    }
+  /* verify with GPP function */
+  *percentage = 100;
+  derivative_x_y(smoothedim, rows, cols, verify_delta_x, verify_delta_y, percentage);
 
-    /* Check for delta_y*/
-    for(i = 0; i < rows*cols; i++) {
-        if(delta_y[i] != verify_delta_y[i]) {
-            //fprintf(stderr, "Got incorrect delta_y result back! Expected %d, Got %d (i: %d)\r\n", verify_delta_y[i], delta_y[i], i);
-            status = DSP_EFAIL;
-        }
+  /* Check for delta_x*/
+  for (i = 0; i < rows * cols; i++) {
+    if (delta_x[i] != verify_delta_x[i]) {
+      //fprintf(stderr, "Got incorrect delta_x result back! Expected %d, Got %d (i: %d)\r\n", verify_delta_x[i], delta_x[i], i);
+      status = DSP_EFAIL;
     }
+  }
 
-    /* Print if verify was succesfull */
-    if(DSP_SUCCEEDED(status)) {
-        VPRINT("Execution of canny_edge_Derivative was succesfull!\r\n");
+  /* Check for delta_y*/
+  for (i = 0; i < rows * cols; i++) {
+    if (delta_y[i] != verify_delta_y[i]) {
+      //fprintf(stderr, "Got incorrect delta_y result back! Expected %d, Got %d (i: %d)\r\n", verify_delta_y[i], delta_y[i], i);
+      status = DSP_EFAIL;
     }
-    else {
-        fprintf(stderr, "Execution of canny_edge_Derivative was FAILED!\r\n");
-    }
+  }
 
-    free(verify_delta_x);
-    free(verify_delta_y);
+  /* Print if verify was succesfull */
+  if (DSP_SUCCEEDED(status)) {
+    VPRINT("Execution of canny_edge_Derivative was succesfull!\r\n");
+  } else {
+    fprintf(stderr, "Execution of canny_edge_Derivative was FAILED!\r\n");
+  }
+
+  free(verify_delta_x);
+  free(verify_delta_y);
 #endif
 }
 
-STATIC Void canny_edge_Magnitude(short int *delta_x, short int *delta_y, int rows, int cols, short int *magnitude, Uint8 processorId)
+STATIC Void canny_edge_Magnitude(short int *delta_x, short int *delta_y, int rows, int cols, short int *magnitude,
+                                 Uint8 processorId)
 {
-    int i;
-    int *magnitude_square = (int *)buffers[4][0];
+  int i;
+  int *magnitude_square = (int *)buffers[4][0];
 #if VERIFY
-    int status = DSP_SOK;
-    short int *gpp_magnitude = (short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
+  int status = DSP_SOK;
+  short int *gpp_magnitude = (short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
 #endif
 
-    /* Send the input data */
-    /* Send delta_x */
-    POOL_writeback (POOL_makePoolId(processorId, SAMPLE_POOL_ID),
-                    delta_x,
-                    buffer_sizes[2]);
-    /* Send delta_y */
-    POOL_writeback (POOL_makePoolId(processorId, SAMPLE_POOL_ID),
-                    delta_y,
-                    buffer_sizes[3]);
+  /* Send the input data */
+  /* Send delta_x */
+  POOL_writeback(POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                 delta_x,
+                 buffer_sizes[2]);
+  /* Send delta_y */
+  POOL_writeback(POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                 delta_y,
+                 buffer_sizes[3]);
 
 
-    NOTIFY_notify (processorId, canny_edge_IPS_ID, canny_edge_IPS_EVENTNO, canny_edge_MAGNITUDE);
-    VPRINT("  canny_edge_Magnitude send, waiting for response...\r\n");
+  NOTIFY_notify(processorId, canny_edge_IPS_ID, canny_edge_IPS_EVENTNO, canny_edge_MAGNITUDE);
+  VPRINT("  canny_edge_Magnitude send, waiting for response...\r\n");
 
-    /* Wait for the response */
-    sem_wait(&sem);
+  /* Wait for the response */
+  sem_wait(&sem);
 
-    /* Invalidate the result */
-    POOL_invalidate(POOL_makePoolId(processorId, SAMPLE_POOL_ID),
-                    magnitude,
-                    buffer_sizes[4]);
+  /* Invalidate the result */
+  POOL_invalidate(POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                  magnitude,
+                  buffer_sizes[4]);
 
-    /* Do sqrt on GPP */
-    for(i=0; i < rows*cols; i++)
-    {
-        magnitude[i] = (short)(0.5 + sqrt((float)magnitude_square[i]));
-    }
+  /* Do sqrt on GPP */
+  for (i = 0; i < rows * cols; i++) {
+    magnitude[i] = (short)(0.5 + sqrt((float)magnitude_square[i]));
+  }
 
 #if VERIFY
-    /* Verify magnitude using the GPP code */
-    magnitude_x_y(delta_x, delta_y, canny_edge_rows, canny_edge_cols, gpp_magnitude);
+  /* Verify magnitude using the GPP code */
+  magnitude_x_y(delta_x, delta_y, canny_edge_rows, canny_edge_cols, gpp_magnitude);
 
-    /* Check if it matches */
-    for(i = 0; i < rows*cols; i++) {
-        if(magnitude[i] != gpp_magnitude[i]) {
-            fprintf(stderr, "Got incorrect magnitude result back! Expected %d, Got %d (i: %d)\r\n", gpp_magnitude[i], magnitude[i], i);
-            status = DSP_EFAIL;
-        }
+  /* Check if it matches */
+  for (i = 0; i < rows * cols; i++) {
+    if (magnitude[i] != gpp_magnitude[i]) {
+      fprintf(stderr, "Got incorrect magnitude result back! Expected %d, Got %d (i: %d)\r\n", gpp_magnitude[i], magnitude[i],
+              i);
+      status = DSP_EFAIL;
     }
+  }
 
-    if(DSP_SUCCEEDED(status)) {
-        VPRINT("Execution of canny_edge_Magnitude was succesfull!\r\n");
-    }
-    else {
-        fprintf(stderr, "Execution of canny_edge_Magnitude FAILED!\r\n");
-    }
-    free(gpp_magnitude);
+  if (DSP_SUCCEEDED(status)) {
+    VPRINT("Execution of canny_edge_Magnitude was succesfull!\r\n");
+  } else {
+    fprintf(stderr, "Execution of canny_edge_Magnitude FAILED!\r\n");
+  }
+  free(gpp_magnitude);
 #endif
 }
 
@@ -852,269 +838,261 @@ STATIC Void canny_edge_Magnitude(short int *delta_x, short int *delta_y, int row
 //////////////////////////////////////////////////////////////////////////////////////////
 
 /* Guassian smooth on Neon */
-STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Uint16 rows, Uint16 cols)
+STATIC void gaussian_smooth_neon(unsigned char *image, short int *smoothedim, Uint16 rows, Uint16 cols)
 {
 #if VERIFY
-    short int *verify_smoothedim=(short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
+  short int *verify_smoothedim = (short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
 #endif
 
-    float *tempim;                          /* Intermediate storing memory for x-direction*/
-    float *rows_image;                     /* Image for x-smoothing*/
-    float *cols_image;                    /*  Image for y-smoothing*/
-    float neon_kernel[17];               /* New kernel for neon */
-    unsigned int neon_cols=cols+16;     /* Cols value for x-direction*/
-    unsigned int neon_rows=rows+16;     /* Rows value for y-direction*/
-    unsigned int i, k, a, c, r, j, b; /*Loop variant*/
-    float32x4_t neon_pixel;       /* Four consecutive pixel values */
-    float32x4_t neon_factor;      /* Four consecutive filter values */
-    float32x4_t temp_dot;         /* The neon multiplication result store here */
-    float dot= 0.0f;              /* The sum of pixel values */
-    float Referkernel = 0.0f;      /* Intermediate sum of filter values considering boundary situation */
-    float sum = 0.0f;             /* The sum of filter values */
+  float *tempim;                          /* Intermediate storing memory for x-direction*/
+  float *rows_image;                     /* Image for x-smoothing*/
+  float *cols_image;                    /*  Image for y-smoothing*/
+  float neon_kernel[17];               /* New kernel for neon */
+  unsigned int neon_cols = cols + 16; /* Cols value for x-direction*/
+  unsigned int neon_rows = rows + 16; /* Rows value for y-direction*/
+  unsigned int i, k, a, c, r, j, b; /*Loop variant*/
+  float32x4_t neon_pixel;       /* Four consecutive pixel values */
+  float32x4_t neon_factor;      /* Four consecutive filter values */
+  float32x4_t temp_dot;         /* The neon multiplication result store here */
+  float dot = 0.0f;             /* The sum of pixel values */
+  float Referkernel = 0.0f;      /* Intermediate sum of filter values considering boundary situation */
+  float sum = 0.0f;             /* The sum of filter values */
 
-    /****************************************************************************
-    * Allocate a temporary buffer image and the smoothed image.
-    ****************************************************************************/
-    if((tempim = (float *) malloc(rows*cols* sizeof(float))) == NULL)
-    {
-        fprintf(stderr, "Error allocating the buffer image.\n");
-        exit(1);
-    }
-    
-    /****************************************************************************
-    * Define the new kernel and referenced kernel in boundary case.
-    ****************************************************************************/
-    
-    for (b = 0 ; b <= 16 ; b++)
-    {
-        if(b > 0 && b < 16 )
-            neon_kernel[b] = gaussian_kernel [b-1];
-        else
-            neon_kernel [b] = 0;    
-    }
-    
-    for( a=8; a<=16; a++){
-        Referkernel += neon_kernel[a];
-    }
-    /****************************************************************************
-    * Blur in the x - direction.
-    ****************************************************************************/
-    VPRINT("   Bluring the image in the X-direction.\n");
-    /* Allocate the memory to new image and set the boundary value as 0. */
-    rows_image = (float*)malloc(neon_cols*rows*sizeof(float));
-    for( i =0; i<rows; i++){
-    	/* Set the front end 8 pixels' value as 0*/
-        memset(&rows_image[i*neon_cols],0,8*sizeof(float));
+  /****************************************************************************
+  * Allocate a temporary buffer image and the smoothed image.
+  ****************************************************************************/
+  if ((tempim = (float *) malloc(rows * cols * sizeof(float))) == NULL) {
+    fprintf(stderr, "Error allocating the buffer image.\n");
+    exit(1);
+  }
 
-        for( k=0; k<cols;k++){
-            rows_image[i*neon_cols+8+k] = (float)image[i*cols+k];
+  /****************************************************************************
+  * Define the new kernel and referenced kernel in boundary case.
+  ****************************************************************************/
+
+  for (b = 0 ; b <= 16 ; b++) {
+    if (b > 0 && b < 16) {
+      neon_kernel[b] = gaussian_kernel [b - 1];
+    } else {
+      neon_kernel [b] = 0;
+    }
+  }
+
+  for (a = 8; a <= 16; a++) {
+    Referkernel += neon_kernel[a];
+  }
+  /****************************************************************************
+  * Blur in the x - direction.
+  ****************************************************************************/
+  VPRINT("   Bluring the image in the X-direction.\n");
+  /* Allocate the memory to new image and set the boundary value as 0. */
+  rows_image = (float *)malloc(neon_cols * rows * sizeof(float));
+  for (i = 0; i < rows; i++) {
+    /* Set the front end 8 pixels' value as 0*/
+    memset(&rows_image[i * neon_cols], 0, 8 * sizeof(float));
+
+    for (k = 0; k < cols; k++) {
+      rows_image[i * neon_cols + 8 + k] = (float)image[i * cols + k];
+    }
+    /* Set the back end 8 pixels' value as 0*/
+    memset(&rows_image[i * neon_cols + 8 + cols], 0, 8 * sizeof(float));
+  }
+
+  for (r = 0; r < rows; r++) {
+    for (c = 0; c < cols; c++) {
+      /* Assign different sum value according to pixel position */
+      if (c == 0) {
+        sum = Referkernel;
+      } else if (c <= 8) {
+        sum += neon_kernel[8 - c];
+      } else if (c >= cols - 8) {
+        sum -= neon_kernel[cols - c + 8];
+      }
+      /*Calculate the middle pixel value based on neon.*/
+      temp_dot = vdupq_n_f32(0);
+      for (j = 0; j <= 3; j++) {
+        int e = 0;
+        if (j >= 2) {
+          e = 1;
         }
-        /* Set the back end 8 pixels' value as 0*/
-        memset(&rows_image[i*neon_cols+8+cols],0,8*sizeof(float));
-    }
+        /*Peform the multiplication by Neon and store the partial sum in temp_dot.*/
+        neon_pixel = vld1q_f32((float32_t const *)&rows_image[r * neon_cols + c + j * 4 + e]);
+        neon_factor = vld1q_f32((float32_t const *)&neon_kernel[j * 4 + e]);
+        temp_dot = vmlaq_f32(temp_dot, neon_pixel, neon_factor);
+      }
 
-    for(r=0; r<rows; r++){
-        for( c=0; c<cols; c++){
-            /* Assign different sum value according to pixel position */
-            if(c==0){
-                sum = Referkernel;
-            }
-            else if(c <=8){
-                sum += neon_kernel[8-c];
-            }
-            else if(c>=cols-8){
-                sum -=neon_kernel[cols-c+8];
-            }
-            /*Calculate the middle pixel value based on neon.*/
-            temp_dot = vdupq_n_f32(0);
-            for( j=0; j<=3; j++)
-            {
-                int e=0;
-                if(j>=2)
-                {
-                    e=1;
-                }
-                /*Peform the multiplication by Neon and store the partial sum in temp_dot.*/
-                neon_pixel = vld1q_f32((float32_t const *)&rows_image[r*neon_cols+c+j*4+e]);
-                neon_factor = vld1q_f32((float32_t const *)&neon_kernel[j*4+e]);
-                temp_dot = vmlaq_f32(temp_dot, neon_pixel, neon_factor);
-            }
-            
-                /* Add up partial sum of Neon and the middle target value.*/
-            dot += vgetq_lane_f32(temp_dot, 0);
-            dot += vgetq_lane_f32(temp_dot, 1);
-            dot += vgetq_lane_f32(temp_dot, 2);
-            dot += vgetq_lane_f32(temp_dot, 3);
-            dot += rows_image[r*neon_cols+c+8] * neon_kernel[8];
-               /* Assign the pixel value to the tempim and the dot as 0 again.*/
-            tempim[r*cols+c] = dot/sum;
-            dot=0; 
+      /* Add up partial sum of Neon and the middle target value.*/
+      dot += vgetq_lane_f32(temp_dot, 0);
+      dot += vgetq_lane_f32(temp_dot, 1);
+      dot += vgetq_lane_f32(temp_dot, 2);
+      dot += vgetq_lane_f32(temp_dot, 3);
+      dot += rows_image[r * neon_cols + c + 8] * neon_kernel[8];
+      /* Assign the pixel value to the tempim and the dot as 0 again.*/
+      tempim[r * cols + c] = dot / sum;
+      dot = 0;
+    }
+  }
+
+
+  /****************************************************************************
+  * Blur in the y - direction.
+  ****************************************************************************/
+  VPRINT("   Bluring the image in the Y-direction.\n");
+  /* Allocate the memory to new image and set the boundary value as 0. The image is stored in unit of cols for convient y-direction smoothing*/
+  cols_image = (float *)malloc(neon_rows * cols * sizeof(float));
+  for (i = 0; i < cols; i++) {
+    /* Set the front end 8 pixels' value as 0*/
+    memset(&cols_image[i * neon_rows], 0, 8 * sizeof(float));
+    for (k = 0; k < rows; k++) {
+      cols_image[i * neon_rows + 8 + k] = tempim[k * cols + i];
+    }
+    /* Set the back end 8 pixels' value as 0*/
+    memset(&cols_image[i * neon_rows + 8 + rows], 0, 8 * sizeof(float));
+  }
+
+
+  for (c = 0; c < cols; c++) {
+    for (r = 0; r < rows; r++) {
+      /* Assign different sum value according to pixel position */
+      if (r == 0) {
+        sum = Referkernel;
+      } else if (r <= 8) {
+        sum += neon_kernel[8 - r];
+      } else if (r >= rows - 8) {
+        sum -= neon_kernel[rows - r + 8];
+      }
+      /*Calculate the middle pixel value based on neon.*/
+      temp_dot = vdupq_n_f32(0);
+      for (j = 0; j <= 3; j++) {
+        int e = 0;
+        if (j >= 2) {
+          e = 1;
         }
+        /*Peform the multiplication by Neon and store the partial sum in temp_dot.*/
+        neon_pixel = vld1q_f32((float32_t const *)&cols_image[c * neon_rows + r + j * 4 + e]);
+        neon_factor = vld1q_f32((float32_t const *)&neon_kernel[j * 4 + e]);
+        temp_dot = vmlaq_f32(temp_dot, neon_pixel, neon_factor);
+      }
+
+      /* Add up partial sum of Neon and the middle target value.*/
+      dot += vgetq_lane_f32(temp_dot, 0);
+      dot += vgetq_lane_f32(temp_dot, 1);
+      dot += vgetq_lane_f32(temp_dot, 2);
+      dot += vgetq_lane_f32(temp_dot, 3);
+      dot += cols_image[c * neon_rows + r + 8] * neon_kernel[8];
+      /* Assign the pixel value to the smoothedim and the dot as 0 again.*/
+      smoothedim[r * cols + c] = (short int)(dot * BOOSTBLURFACTOR / sum + 0.5);
+      dot = 0;
     }
-
-
-    /****************************************************************************
-    * Blur in the y - direction.
-    ****************************************************************************/
-    VPRINT("   Bluring the image in the Y-direction.\n");
-    /* Allocate the memory to new image and set the boundary value as 0. The image is stored in unit of cols for convient y-direction smoothing*/
-    cols_image = (float*)malloc(neon_rows*cols*sizeof(float));
-    for( i =0; i<cols; i++){
-    	/* Set the front end 8 pixels' value as 0*/
-        memset(&cols_image[i*neon_rows],0,8*sizeof(float));
-        for( k=0; k<rows;k++){
-            cols_image[i*neon_rows+8+k] = tempim[k*cols+i];
-        }
-        /* Set the back end 8 pixels' value as 0*/
-        memset(&cols_image[i*neon_rows+8+rows],0,8*sizeof(float));
-    }
-
-
-    for(c=0; c<cols; c++){
-        for( r=0; r<rows; r++){
-            /* Assign different sum value according to pixel position */
-            if(r==0){
-                sum = Referkernel;
-            }
-            else if(r <=8){
-                sum += neon_kernel[8-r];
-            }
-            else if(r>=rows-8){
-                sum -=neon_kernel[rows-r+8];
-            }
-            /*Calculate the middle pixel value based on neon.*/
-            temp_dot = vdupq_n_f32(0);
-            for( j=0; j<=3; j++)
-            {
-                int e=0;
-                if(j>=2)
-                {
-                    e=1;
-                }
-                /*Peform the multiplication by Neon and store the partial sum in temp_dot.*/
-                neon_pixel = vld1q_f32((float32_t const *)&cols_image[c*neon_rows+r+j*4+e]);
-                neon_factor = vld1q_f32((float32_t const *)&neon_kernel[j*4+e]);
-                temp_dot = vmlaq_f32(temp_dot,neon_pixel,neon_factor);
-            }
-            
-            /* Add up partial sum of Neon and the middle target value.*/
-            dot += vgetq_lane_f32(temp_dot, 0);
-            dot += vgetq_lane_f32(temp_dot, 1);
-            dot += vgetq_lane_f32(temp_dot, 2);
-            dot += vgetq_lane_f32(temp_dot, 3);
-            dot += cols_image[c*neon_rows+r+8] * neon_kernel[8];
-            /* Assign the pixel value to the smoothedim and the dot as 0 again.*/
-            smoothedim[r*cols+c] = (short int )(dot*BOOSTBLURFACTOR/sum + 0.5);
-            dot=0; 
-        }
-    }
-           /* Free the memory zone*/
-    free(rows_image);
-    free(cols_image);
-    free(tempim);
+  }
+  /* Free the memory zone*/
+  free(rows_image);
+  free(cols_image);
+  free(tempim);
 
 #if VERIFY
-    /* Verify guassian smooth neon using the GPP code */
-    gaussian_smooth(image, verify_smoothedim, canny_edge_rows, canny_edge_cols);
+  /* Verify guassian smooth neon using the GPP code */
+  gaussian_smooth(image, verify_smoothedim, canny_edge_rows, canny_edge_cols);
 
-    /* Check if it matches */
-    for(i = 0; i < rows*cols; i++) {
-        if(smoothedim[i] != verify_smoothedim[i]) {
-            fprintf(stderr, "Got incorrect guassian smooth result back! Expected %d, Got %d (i: %d)\r\n", verify_smoothedim[i], smoothedim[i], i);
-        }
+  /* Check if it matches */
+  for (i = 0; i < rows * cols; i++) {
+    if (smoothedim[i] != verify_smoothedim[i]) {
+      fprintf(stderr, "Got incorrect guassian smooth result back! Expected %d, Got %d (i: %d)\r\n", verify_smoothedim[i],
+              smoothedim[i], i);
     }
- 
-    fprintf(stderr, "Execution of guassian_smooth_neon was successful\r\n");
-    
-    free(verify_smoothedim);
+  }
+
+  fprintf(stderr, "Execution of guassian_smooth_neon was successful\r\n");
+
+  free(verify_smoothedim);
 #endif
 
 }
 
-STATIC void derivative_x_y_neon(short int *smoothedim, int rows, int cols, short int *delta_x, short int *delta_y, short int *percentage)
+STATIC void derivative_x_y_neon(short int *smoothedim, int rows, int cols, short int *delta_x, short int *delta_y,
+                                short int *percentage)
 {
 #if VERIFY
-    int i;
-    int derivative_neon_fail = 0; //flag
-    short int *verify_delta_x = (short int *) malloc(sizeof(short int) * rows * cols);
-    short int *verify_delta_y = (short int *) malloc(sizeof(short int) * rows * cols);
+  int i;
+  int derivative_neon_fail = 0; //flag
+  short int *verify_delta_x = (short int *) malloc(sizeof(short int) * rows * cols);
+  short int *verify_delta_y = (short int *) malloc(sizeof(short int) * rows * cols);
 #endif
 
-   int r, c, pos;
-   /****************************************************************************
-   * Allocate images to store the derivatives.
-   ****************************************************************************/
-   if((delta_x = (short *) malloc(rows*cols* sizeof(short))) == NULL){
-      fprintf(stderr, "Error allocating the delta_x image.\n");
-      exit(1);
-   }
-   if((delta_y = (short *) malloc(rows*cols* sizeof(short))) == NULL){
-      fprintf(stderr, "Error allocating the delta_y image.\n");
-      exit(1);
-   }
+  int r, c, pos;
+  /****************************************************************************
+  * Allocate images to store the derivatives.
+  ****************************************************************************/
+  if ((delta_x = (short *) malloc(rows * cols * sizeof(short))) == NULL) {
+    fprintf(stderr, "Error allocating the delta_x image.\n");
+    exit(1);
+  }
+  if ((delta_y = (short *) malloc(rows * cols * sizeof(short))) == NULL) {
+    fprintf(stderr, "Error allocating the delta_y image.\n");
+    exit(1);
+  }
 
-   for(r = rows*(100 - *percentage)/100;r<rows;r++){
-      pos = r * cols;
-      delta_x[pos] = smoothedim[pos+1] - smoothedim[pos];
-      pos++;
-      for(c=1;c<(cols-1);c++,pos++){
-         delta_x[pos] = smoothedim[pos+1] - smoothedim[pos-1];
-      }
-      delta_x[pos] = smoothedim[pos] - smoothedim[pos-1];
-   }
+  for (r = rows * (100 - *percentage) / 100; r < rows; r++) {
+    pos = r * cols;
+    delta_x[pos] = smoothedim[pos + 1] - smoothedim[pos];
+    pos++;
+    for (c = 1; c < (cols - 1); c++, pos++) {
+      delta_x[pos] = smoothedim[pos + 1] - smoothedim[pos - 1];
+    }
+    delta_x[pos] = smoothedim[pos] - smoothedim[pos - 1];
+  }
 
-   printf("Computing the derivative using Neon.\n");
-   for(c=0;c<cols;c+=4){
-      int16x4_t vector_smoothedim_3, vector_smoothedim_4, vector_delta_y;
-   	  pos = c;
-	    vector_smoothedim_3 = vld1_s16(&(smoothedim[pos+cols]));
-   	  vector_smoothedim_4 = vld1_s16(&(smoothedim[pos]));
-   	  vector_delta_y = vsub_s16(vector_smoothedim_3, vector_smoothedim_4);
-   	  vst1_s16(&(delta_y[pos]), vector_delta_y);
-	    pos += cols;
-	    for(;r<(rows-1);r++,pos+=cols){ 	
-   	      vector_smoothedim_3 = vld1_s16(&(smoothedim[pos+cols]));
-   	      vector_smoothedim_4 = vld1_s16(&(smoothedim[pos-cols]));
-   	      vector_delta_y = vsub_s16(vector_smoothedim_3, vector_smoothedim_4);
-   	      vst1_s16(&(delta_y[pos]), vector_delta_y);
-      }
-	    vector_smoothedim_3 = vld1_s16(&(smoothedim[pos]));
-   	  vector_smoothedim_4 = vld1_s16(&(smoothedim[pos-cols]));
-   	  vector_delta_y = vsub_s16(vector_smoothedim_3, vector_smoothedim_4);
-   	  vst1_s16(&(delta_y[pos]), vector_delta_y);
-   }
+  printf("Computing the derivative using Neon.\n");
+  for (c = 0; c < cols; c += 4) {
+    int16x4_t vector_smoothedim_3, vector_smoothedim_4, vector_delta_y;
+    pos = c;
+    vector_smoothedim_3 = vld1_s16(&(smoothedim[pos + cols]));
+    vector_smoothedim_4 = vld1_s16(&(smoothedim[pos]));
+    vector_delta_y = vsub_s16(vector_smoothedim_3, vector_smoothedim_4);
+    vst1_s16(&(delta_y[pos]), vector_delta_y);
+    pos += cols;
+    for (; r < (rows - 1); r++, pos += cols) {
+      vector_smoothedim_3 = vld1_s16(&(smoothedim[pos + cols]));
+      vector_smoothedim_4 = vld1_s16(&(smoothedim[pos - cols]));
+      vector_delta_y = vsub_s16(vector_smoothedim_3, vector_smoothedim_4);
+      vst1_s16(&(delta_y[pos]), vector_delta_y);
+    }
+    vector_smoothedim_3 = vld1_s16(&(smoothedim[pos]));
+    vector_smoothedim_4 = vld1_s16(&(smoothedim[pos - cols]));
+    vector_delta_y = vsub_s16(vector_smoothedim_3, vector_smoothedim_4);
+    vst1_s16(&(delta_y[pos]), vector_delta_y);
+  }
 
 #if VERIFY
-    /* verify with GPP function */
-    *percentage = 100;
-    derivative_x_y(smoothedim, rows, cols, verify_delta_x, verify_delta_y, percentage);
-  
-    /* Check for delta_x*/
-    for(i = 0; i < rows*cols; i++) {
-        if(delta_x[i] != verify_delta_x[i]) {
-            fprintf(stderr, "Got incorrect delta_x using Neon! Expected %d, Got %d (i: %d)\r\n", verify_delta_x[i], delta_x[i], i);
-            derivative_neon_fail = 1;
-        }
-    }
+  /* verify with GPP function */
+  *percentage = 100;
+  derivative_x_y(smoothedim, rows, cols, verify_delta_x, verify_delta_y, percentage);
 
-    /* Check for delta_y*/
-    for(i = 0; i < rows*cols; i++) {
-        if(delta_y[i] != verify_delta_y[i]) {
-            fprintf(stderr, "Got incorrect delta_y using Neon! Expected %d, Got %d (i: %d)\r\n", verify_delta_y[i], delta_y[i], i);
-            derivative_neon_fail = 1;
-        }
+  /* Check for delta_x*/
+  for (i = 0; i < rows * cols; i++) {
+    if (delta_x[i] != verify_delta_x[i]) {
+      fprintf(stderr, "Got incorrect delta_x using Neon! Expected %d, Got %d (i: %d)\r\n", verify_delta_x[i], delta_x[i], i);
+      derivative_neon_fail = 1;
     }
+  }
 
-    /* Print if verify was succesfull */
-    if(derivative_neon_fail == 0) {
-        VPRINT("Execution of derivative_x_y_neon was succesfull!\r\n");
+  /* Check for delta_y*/
+  for (i = 0; i < rows * cols; i++) {
+    if (delta_y[i] != verify_delta_y[i]) {
+      fprintf(stderr, "Got incorrect delta_y using Neon! Expected %d, Got %d (i: %d)\r\n", verify_delta_y[i], delta_y[i], i);
+      derivative_neon_fail = 1;
     }
-    else {
-        fprintf(stderr, "Execution of derivative_x_y_neon was FAILED!\r\n");
-    }
+  }
 
-    free(verify_delta_x);
-    free(verify_delta_y);
+  /* Print if verify was succesfull */
+  if (derivative_neon_fail == 0) {
+    VPRINT("Execution of derivative_x_y_neon was succesfull!\r\n");
+  } else {
+    fprintf(stderr, "Execution of derivative_x_y_neon was FAILED!\r\n");
+  }
+
+  free(verify_delta_x);
+  free(verify_delta_y);
 #endif
 
 }
@@ -1122,70 +1100,66 @@ STATIC void derivative_x_y_neon(short int *smoothedim, int rows, int cols, short
 STATIC void magnitude_x_y_neon(short int *delta_x, short int *delta_y, int rows, int cols, short int *magnitude)
 {
 #if VERIFY
-	int i; // for counting
-	int magnitude_neon_fail = 0; // flag for failure
-    short int *verify_magnitude=(short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
+  int i; // for counting
+  int magnitude_neon_fail = 0; // flag for failure
+  short int *verify_magnitude = (short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
 #endif
 
-	int *magnitude_square = (int *)malloc(sizeof(int) * rows * cols);
-	magnitude_x_y_sq_neon(delta_x, delta_y, rows, cols, magnitude_square);
-	magnitude_x_y_rt(rows, cols, magnitude_square, magnitude);
-	free(magnitude_square);
+  int *magnitude_square = (int *)malloc(sizeof(int) * rows * cols);
+  magnitude_x_y_sq_neon(delta_x, delta_y, rows, cols, magnitude_square);
+  magnitude_x_y_rt(rows, cols, magnitude_square, magnitude);
+  free(magnitude_square);
 
 #if VERIFY
-    /* Verify magnitude_x_y_neon using the GPP code */
-    magnitude_x_y(delta_x, delta_y, rows, cols, verify_magnitude);
+  /* Verify magnitude_x_y_neon using the GPP code */
+  magnitude_x_y(delta_x, delta_y, rows, cols, verify_magnitude);
 
-    /* Check if it matches */
-    for(i = 0; i < rows*cols; i++) {
-        if(magnitude[i] != verify_magnitude[i]) {
-            fprintf(stderr, "Got incorrect magnitude result back! Expected %d, Got %d (i: %d)\r\n", verify_magnitude[i], magnitude[i], i);
-            magnitude_neon_fail = 1;
-        }
+  /* Check if it matches */
+  for (i = 0; i < rows * cols; i++) {
+    if (magnitude[i] != verify_magnitude[i]) {
+      fprintf(stderr, "Got incorrect magnitude result back! Expected %d, Got %d (i: %d)\r\n", verify_magnitude[i],
+              magnitude[i], i);
+      magnitude_neon_fail = 1;
     }
- 
-    if(magnitude_neon_fail) {
-        VPRINT("Execution of magnitude_x_y_neon FAILED!\r\n");
-    }
-    else {
-        fprintf(stderr, "Execution of magnitude_x_y_neon was successful!\r\n");
-    }
+  }
 
-    free(verify_magnitude);
+  if (magnitude_neon_fail) {
+    VPRINT("Execution of magnitude_x_y_neon FAILED!\r\n");
+  } else {
+    fprintf(stderr, "Execution of magnitude_x_y_neon was successful!\r\n");
+  }
+
+  free(verify_magnitude);
 #endif
 }
 
 STATIC void magnitude_x_y_sq_neon(short int *delta_x, short int *delta_y, int rows, int cols, int *magnitude_square)
 {
-    int r, c, pos;
-    printf("Computing the squared magnitude using Neon.\n");
-    for(r=0,pos=0; r<rows; r++)
-    {
-        for(c=0; c<cols; c+=4)
-        {
-            int16x4_t vector_delta_x, vector_delta_y;
-            int32x4_t vector_delta_x_sq, vector_delta_y_sq, vector_magnitude_square;
-            vector_delta_x = vld1_s16(&(delta_x[pos]));
-            vector_delta_y = vld1_s16(&(delta_y[pos]));
-            vector_delta_x_sq = vmull_s16(vector_delta_x, vector_delta_x);
-            vector_delta_y_sq = vmull_s16(vector_delta_y, vector_delta_y);
-            vector_magnitude_square = vaddq_s32(vector_delta_x_sq, vector_delta_y_sq);
-            vst1q_s32 (&magnitude_square[pos], vector_magnitude_square);
-            pos += 4;
-        }
+  int r, c, pos;
+  printf("Computing the squared magnitude using Neon.\n");
+  for (r = 0, pos = 0; r < rows; r++) {
+    for (c = 0; c < cols; c += 4) {
+      int16x4_t vector_delta_x, vector_delta_y;
+      int32x4_t vector_delta_x_sq, vector_delta_y_sq, vector_magnitude_square;
+      vector_delta_x = vld1_s16(&(delta_x[pos]));
+      vector_delta_y = vld1_s16(&(delta_y[pos]));
+      vector_delta_x_sq = vmull_s16(vector_delta_x, vector_delta_x);
+      vector_delta_y_sq = vmull_s16(vector_delta_y, vector_delta_y);
+      vector_magnitude_square = vaddq_s32(vector_delta_x_sq, vector_delta_y_sq);
+      vst1q_s32(&magnitude_square[pos], vector_magnitude_square);
+      pos += 4;
     }
+  }
 }
 
 STATIC void magnitude_x_y_rt(int rows, int cols, int *magnitude_square, short int *magnitude)
 {
-    int r, c, pos;
-    for(r=0,pos=0; r<rows; r++)
-    {
-        for(c=0; c<cols; c++,pos++)
-        {
-            magnitude[pos] = (short)(0.5 + sqrt((float)magnitude_square[pos]));
-        }
+  int r, c, pos;
+  for (r = 0, pos = 0; r < rows; r++) {
+    for (c = 0; c < cols; c++, pos++) {
+      magnitude[pos] = (short)(0.5 + sqrt((float)magnitude_square[pos]));
     }
+  }
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////
@@ -1200,25 +1174,22 @@ STATIC void magnitude_x_y_rt(int rows, int cols, int *magnitude_square, short in
 *******************************************************************************/
 STATIC double angle_radians(double x, double y)
 {
-    double xu, yu, ang;
+  double xu, yu, ang;
 
-    xu = fabs(x);
-    yu = fabs(y);
+  xu = fabs(x);
+  yu = fabs(y);
 
-    if((xu == 0) && (yu == 0)) return(0);
+  if ((xu == 0) && (yu == 0)) { return (0); }
 
-    ang = atan(yu/xu);
+  ang = atan(yu / xu);
 
-    if(x >= 0)
-    {
-        if(y >= 0) return(ang);
-        else return(2*M_PI - ang);
-    }
-    else
-    {
-        if(y >= 0) return(M_PI - ang);
-        else return(M_PI + ang);
-    }
+  if (x >= 0) {
+    if (y >= 0) { return (ang); }
+    else { return (2 * M_PI - ang); }
+  } else {
+    if (y >= 0) { return (M_PI - ang); }
+    else { return (M_PI + ang); }
+  }
 }
 
 /*******************************************************************************
@@ -1229,20 +1200,18 @@ STATIC double angle_radians(double x, double y)
 * DATE: 2/15/96
 *******************************************************************************/
 STATIC void magnitude_x_y(short int *delta_x, short int *delta_y, int rows, int cols,
-                   short int *magnitude)
+                          short int *magnitude)
 {
-    int r, c, pos, sq1, sq2;
+  int r, c, pos, sq1, sq2;
 
-    for(r=0,pos=0; r<rows; r++)
-    {
-        for(c=0; c<cols; c++,pos++)
-        {
-            sq1 = (int)delta_x[pos] * (int)delta_x[pos];
-            sq2 = (int)delta_y[pos] * (int)delta_y[pos];
-            magnitude[pos] = (short)(0.5 + sqrt((float)sq1 + (float)sq2));
-            // VPRINT(" Magnitude GPP: %d \r \n", magnitude[pos]);
-        }
+  for (r = 0, pos = 0; r < rows; r++) {
+    for (c = 0; c < cols; c++, pos++) {
+      sq1 = (int)delta_x[pos] * (int)delta_x[pos];
+      sq2 = (int)delta_y[pos] * (int)delta_y[pos];
+      magnitude[pos] = (short)(0.5 + sqrt((float)sq1 + (float)sq2));
+      // VPRINT(" Magnitude GPP: %d \r \n", magnitude[pos]);
     }
+  }
 }
 
 
@@ -1258,33 +1227,34 @@ STATIC void magnitude_x_y(short int *delta_x, short int *delta_y, int rows, int 
 * NAME: Mike Heath
 * DATE: 2/15/96
 *******************************************************************************/
-STATIC void derivative_x_y(short int *smoothedim, int rows, int cols, short int *delta_x, short int *delta_y, short int *percentage)
+STATIC void derivative_x_y(short int *smoothedim, int rows, int cols, short int *delta_x, short int *delta_y,
+                           short int *percentage)
 {
-   /*   Percentage indicates how many rows will be calculated on the GPP. The GPP will    */
-   /*   be given an offset when not all calculations are done on the GPP (percentage<100) */
-   int r, c, pos;
-   /* Calculate the X direction */
-   for(r = rows*(100 - *percentage)/100;r < rows; r++){
-      pos = r * cols;
-      delta_x[pos] = smoothedim[pos+1] - smoothedim[pos];
-      pos++;
-      for(c = 1; c < (cols - 1); c++, pos++){
-         delta_x[pos] = smoothedim[pos+1] - smoothedim[pos-1];
-      }
-      delta_x[pos] = smoothedim[pos] - smoothedim[pos-1];
-   }
+  /*   Percentage indicates how many rows will be calculated on the GPP. The GPP will    */
+  /*   be given an offset when not all calculations are done on the GPP (percentage<100) */
+  int r, c, pos;
+  /* Calculate the X direction */
+  for (r = rows * (100 - *percentage) / 100; r < rows; r++) {
+    pos = r * cols;
+    delta_x[pos] = smoothedim[pos + 1] - smoothedim[pos];
+    pos++;
+    for (c = 1; c < (cols - 1); c++, pos++) {
+      delta_x[pos] = smoothedim[pos + 1] - smoothedim[pos - 1];
+    }
+    delta_x[pos] = smoothedim[pos] - smoothedim[pos - 1];
+  }
 
-   /* Calculate the Y direction */
-   for(c = cols*(100 - *percentage)/100; c < cols; c++){
-      pos = c;
-      delta_y[pos] = smoothedim[pos+cols] - smoothedim[pos];
-      pos += cols;
-      // Mistake is somewhere here (only delta_y!)
-      for(r=1;r < (rows-1); r++, pos += cols){
-         delta_y[pos] = smoothedim[pos+cols] - smoothedim[pos-cols];
-      }
-      delta_y[pos] = smoothedim[pos] - smoothedim[pos-cols];
-   }
+  /* Calculate the Y direction */
+  for (c = cols * (100 - *percentage) / 100; c < cols; c++) {
+    pos = c;
+    delta_y[pos] = smoothedim[pos + cols] - smoothedim[pos];
+    pos += cols;
+    // Mistake is somewhere here (only delta_y!)
+    for (r = 1; r < (rows - 1); r++, pos += cols) {
+      delta_y[pos] = smoothedim[pos + cols] - smoothedim[pos - cols];
+    }
+    delta_y[pos] = smoothedim[pos] - smoothedim[pos - cols];
+  }
 }
 
 /*******************************************************************************
@@ -1293,71 +1263,62 @@ STATIC void derivative_x_y(short int *smoothedim, int rows, int cols, short int 
 * NAME: Mike Heath
 * DATE: 2/15/96
 *******************************************************************************/
-STATIC void gaussian_smooth(unsigned char *image, short int* smoothedim, int rows, int cols)
+STATIC void gaussian_smooth(unsigned char *image, short int *smoothedim, int rows, int cols)
 {
-    int r, c, rr, cc,     /* Counter variables. */
-        center;            /* Half of the windowsize. */
-    float *tempim,        /* Buffer for separable filter gaussian smoothing. */
-          dot,            /* Dot product summing variable. */
-          sum;            /* Sum of the kernel weights variable. */
-    
-    center = windowsize_kernel / 2;
+  int r, c, rr, cc,     /* Counter variables. */
+      center;            /* Half of the windowsize. */
+  float *tempim,        /* Buffer for separable filter gaussian smoothing. */
+        dot,            /* Dot product summing variable. */
+        sum;            /* Sum of the kernel weights variable. */
+
+  center = windowsize_kernel / 2;
 
 
-    /****************************************************************************
-    * Allocate a temporary buffer image
-    ****************************************************************************/
-    if((tempim = (float *) malloc(rows*cols* sizeof(float))) == NULL)
-    {
-        fprintf(stderr, "Error allocating the buffer image.\n");
-        exit(1);
-    }
+  /****************************************************************************
+  * Allocate a temporary buffer image
+  ****************************************************************************/
+  if ((tempim = (float *) malloc(rows * cols * sizeof(float))) == NULL) {
+    fprintf(stderr, "Error allocating the buffer image.\n");
+    exit(1);
+  }
 
-    /****************************************************************************
-    * Blur in the x - direction.
-    ****************************************************************************/
-    VPRINT("   Bluring the image in the X-direction.\n");
-    for(r=0; r<rows; r++)
-    {
-        for(c=0; c<cols; c++)
-        {
-            dot = 0.0;
-            sum = 0.0;
-            for(cc=(-center); cc<=center; cc++)
-            {
-                if(((c+cc) >= 0) && ((c+cc) < cols))
-                {
-                    dot += (float)image[r*cols+(c+cc)] * gaussian_kernel[center+cc];
-                    sum += gaussian_kernel[center+cc];
-                }
-            }
-            tempim[r*cols+c] = dot/sum;
+  /****************************************************************************
+  * Blur in the x - direction.
+  ****************************************************************************/
+  VPRINT("   Bluring the image in the X-direction.\n");
+  for (r = 0; r < rows; r++) {
+    for (c = 0; c < cols; c++) {
+      dot = 0.0;
+      sum = 0.0;
+      for (cc = (-center); cc <= center; cc++) {
+        if (((c + cc) >= 0) && ((c + cc) < cols)) {
+          dot += (float)image[r * cols + (c + cc)] * gaussian_kernel[center + cc];
+          sum += gaussian_kernel[center + cc];
         }
+      }
+      tempim[r * cols + c] = dot / sum;
     }
+  }
 
-    /****************************************************************************
-    * Blur in the y - direction.
-    ****************************************************************************/
-    VPRINT("   Bluring the image in the Y-direction.\n");
-    for(c=0; c<cols; c++)
-    {
-        for(r=0; r<rows; r++)
-        {
-            sum = 0.0;
-            dot = 0.0;
-            for(rr=(-center); rr<=center; rr++)
-            {
-                if(((r+rr) >= 0) && ((r+rr) < rows))
-                {
-                    dot += tempim[(r+rr)*cols+c] * gaussian_kernel[center+rr];
-                    sum += gaussian_kernel[center+rr];
-                }
-            }
-            smoothedim[r*cols+c] = (short int)(dot*BOOSTBLURFACTOR/sum + 0.5);
+  /****************************************************************************
+  * Blur in the y - direction.
+  ****************************************************************************/
+  VPRINT("   Bluring the image in the Y-direction.\n");
+  for (c = 0; c < cols; c++) {
+    for (r = 0; r < rows; r++) {
+      sum = 0.0;
+      dot = 0.0;
+      for (rr = (-center); rr <= center; rr++) {
+        if (((r + rr) >= 0) && ((r + rr) < rows)) {
+          dot += tempim[(r + rr) * cols + c] * gaussian_kernel[center + rr];
+          sum += gaussian_kernel[center + rr];
         }
+      }
+      smoothedim[r * cols + c] = (short int)(dot * BOOSTBLURFACTOR / sum + 0.5);
     }
+  }
 
-    free(tempim);
+  free(tempim);
 }
 
 /*******************************************************************************
@@ -1368,34 +1329,32 @@ STATIC void gaussian_smooth(unsigned char *image, short int* smoothedim, int row
 *******************************************************************************/
 STATIC void make_gaussian_kernel(float sigma, float **kernel, int *windowsize)
 {
-    int i, center;
-    float x, fx, sum=0.0;
+  int i, center;
+  float x, fx, sum = 0.0;
 
-    *windowsize = 1 + 2 * ceil(2.5 * sigma);
-    center = (*windowsize) / 2;
+  *windowsize = 1 + 2 * ceil(2.5 * sigma);
+  center = (*windowsize) / 2;
 
-    if((*kernel = (float *) malloc((*windowsize)* sizeof(float))) == NULL)
-    {
-        fprintf(stderr, "Error callocing the gaussian kernel array.\n");
-        exit(1);
+  if ((*kernel = (float *) malloc((*windowsize) * sizeof(float))) == NULL) {
+    fprintf(stderr, "Error callocing the gaussian kernel array.\n");
+    exit(1);
+  }
+
+  for (i = 0; i < (*windowsize); i++) {
+    x = (float)(i - center);
+    fx = pow(2.71828, -0.5 * x * x / (sigma * sigma)) / (sigma * sqrt(6.2831853));
+    (*kernel)[i] = fx;
+    sum += fx;
+  }
+
+  for (i = 0; i < (*windowsize); i++) { (*kernel)[i] /= sum; }
+
+  if (VERBOSE) {
+    printf("The computed filter coefficients are:\n");
+    for (i = 0; i < (*windowsize); i++) {
+      printf("kernel[%d] = %f\n", i, (*kernel)[i]);
     }
-
-    for(i=0; i<(*windowsize); i++)
-    {
-        x = (float)(i - center);
-        fx = pow(2.71828, -0.5*x*x/(sigma*sigma)) / (sigma * sqrt(6.2831853));
-        (*kernel)[i] = fx;
-        sum += fx;
-    }
-
-    for(i=0; i<(*windowsize); i++) (*kernel)[i] /= sum;
-
-    if(VERBOSE)
-    {
-        printf("The computed filter coefficients are:\n");
-        for(i=0; i<(*windowsize); i++)
-            printf("kernel[%d] = %f\n", i, (*kernel)[i]);
-    }
+  }
 }
 
 
