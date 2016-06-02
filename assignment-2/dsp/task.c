@@ -18,12 +18,13 @@
 #include <task.h>
 
 /* Buffer defines */
-#define NUM_BUF_SIZES                    5 ///< Amount of pools to be configured
+#define NUM_BUF_SIZES                    6 ///< Amount of pools to be configured
 #define NUM_BUF_POOL0                    1 ///< Amount of buffers in the first pool
 #define NUM_BUF_POOL1                    1 ///< Amount of buffers in the second pool
 #define NUM_BUF_POOL2                    1 ///< Amount of buffers in the thrid pool
 #define NUM_BUF_POOL3                    1 ///< Amount of buffers in the fourth pool
 #define NUM_BUF_POOL4                    1 ///< Amount of buffers in the fifth pool
+#define NUM_BUF_POOL5                    1 ///< Amount of buffers in the sixth pool
 #define NUM_BUF_MAX                      1 ///< Maximum amount of buffers in pool
 
 enum {
@@ -35,7 +36,7 @@ enum {
     canny_edge_MAGNITUDE                ///< Calculate the magnitude
 };
 
-Uint32 pool_sizes[] = {NUM_BUF_POOL0, NUM_BUF_POOL1, NUM_BUF_POOL2, NUM_BUF_POOL3, NUM_BUF_POOL4};
+Uint32 pool_sizes[] = {NUM_BUF_POOL0, NUM_BUF_POOL1, NUM_BUF_POOL2, NUM_BUF_POOL3, NUM_BUF_POOL4, NUM_BUF_POOL5};
 Void *dsp_buffers[NUM_BUF_SIZES][NUM_BUF_MAX];      ///< Buffer addresses on the DSP
 Uint32 buffer_sizes[NUM_BUF_SIZES];                 ///< The buffer sizes
 Uint16 canny_edge_rows = 0;           ///< Columns of the image
@@ -251,12 +252,20 @@ Void Task_derivative(Void)
   short int *smoothedim = (short int *)dsp_buffers[1][0];
   short int *delta_x = (short int *)dsp_buffers[2][0];
   short int *delta_y = (short int *)dsp_buffers[3][0];
+  short int *percentage = (short int *)dsp_buffers[5][0];
+
+  if(*percentage >= 100)
+  {
+      NOTIFY_notify(ID_GPP, MPCSXFER_IPS_ID, MPCSXFER_IPS_EVENTNO, canny_edge_DERIVATIVE);
+      return;
+  }
 
   /* Invalidate cache */
   BCACHE_inv (dsp_buffers[1][0], buffer_sizes[1], TRUE);
+  BCACHE_inv (dsp_buffers[5][0], buffer_sizes[5], TRUE);
 
   /* Calculate the X direction */
-  for(r=0; r < canny_edge_rows; r++){
+  for(r=0; r < canny_edge_rows*(100-*percentage)/100; r++){
     pos = r * canny_edge_cols;
     (delta_x)[pos] = smoothedim[pos+1] - smoothedim[pos];
     pos++;
@@ -267,16 +276,16 @@ Void Task_derivative(Void)
   }
 
   /* Calculate the Y direction */
-  for(c=0; c < canny_edge_cols; c++){
+  for(c=0; c < canny_edge_cols*(100-*percentage)/100; c++){
     pos = c;
-    (delta_y)[pos] = smoothedim[pos + canny_edge_cols] - smoothedim[pos];
+    delta_y[pos] = smoothedim[pos + canny_edge_cols] - smoothedim[pos];
     pos += canny_edge_cols;
-    for(r=1; r < (canny_edge_rows - 1); r++, pos += canny_edge_cols){
-      (delta_y)[pos] = smoothedim[pos + canny_edge_cols] - smoothedim[pos - canny_edge_cols];
+    for(r=1; r < (canny_edge_rows-1); r++, pos += canny_edge_cols){
+      delta_y[pos] = smoothedim[pos + canny_edge_cols] - smoothedim[pos - canny_edge_cols];
     }
-    (delta_y)[pos] = smoothedim[pos] - smoothedim[pos - canny_edge_cols];
+    delta_y[pos] = smoothedim[pos] - smoothedim[pos - canny_edge_cols];
   }
-
+  NOTIFY_notify(ID_GPP, MPCSXFER_IPS_ID, MPCSXFER_IPS_EVENTNO, *percentage);
   /* Write back and invalidate */
   BCACHE_wbInv(dsp_buffers[2][0], buffer_sizes[2], TRUE);
   BCACHE_wbInv(dsp_buffers[3][0], buffer_sizes[3], TRUE);
