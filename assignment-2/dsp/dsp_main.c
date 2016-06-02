@@ -237,7 +237,7 @@ extern LOG_Obj trace ;
  *  @see    None
  *  ============================================================================
  */
-extern int atoi (const char * str) ;
+extern int atoi(const char *str) ;
 
 
 #if defined (DSP_BOOTMODE_NOBOOT)
@@ -257,7 +257,7 @@ extern int atoi (const char * str) ;
  *  @see    None
  *  ----------------------------------------------------------------------------
  */
-static void HAL_initIsr (Ptr arg) ;
+static void HAL_initIsr(Ptr arg) ;
 #endif
 
 
@@ -277,7 +277,7 @@ static void HAL_initIsr (Ptr arg) ;
  *  @see    None
  *  ----------------------------------------------------------------------------
  */
-static Int Task () ;
+static Int Task() ;
 
 /** ============================================================================
  *  @func   main
@@ -287,14 +287,14 @@ static Int Task () ;
  *  @modif  None
  *  ============================================================================
  */
-Void main (Int argc, Char *argv [])
+Void main(Int argc, Char *argv [])
 {
 
     /* Initialize DSP/BIOS LINK. */
-    DSPLINK_init () ;
+    DSPLINK_init() ;
 
     /* Creating task for MPCSXFER application */
-    TSK_create (Task, NULL, 0) ;
+    TSK_create(Task, NULL, 0) ;
 }
 
 
@@ -306,29 +306,26 @@ Void main (Int argc, Char *argv [])
  *  @modif  None
  *  ----------------------------------------------------------------------------
  */
-static Int Task ()
+static Int Task()
 {
     Int status = SYS_OK ;
-    Task_TransferInfo * info ;
+    Task_TransferInfo *info ;
 
     /* Create Phase */
-    status = Task_create (&info) ;
+    status = Task_create(&info) ;
 
     /* Execute Phase */
-    if (status == SYS_OK) 
-	{
-        status = Task_execute (info) ;
-        if (status != SYS_OK) 
-		{
-            SET_FAILURE_REASON (status) ;
+    if (status == SYS_OK) {
+        status = Task_execute(info) ;
+        if (status != SYS_OK) {
+            SET_FAILURE_REASON(status) ;
         }
     }
 
     /* Delete Phase */
-    status = Task_delete (info) ;
-    if (status != SYS_OK) 
-	{
-        SET_FAILURE_REASON (status) ;
+    status = Task_delete(info) ;
+    if (status != SYS_OK) {
+        SET_FAILURE_REASON(status) ;
     }
 
     return status ;
