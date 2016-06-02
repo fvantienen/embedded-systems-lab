@@ -201,7 +201,7 @@ NORMAL_API DSP_STATUS canny_edge_Create (	IN Char8 * dspExecutable,
         return status;
     }
     else {
-        VPRINT("POOL_open () successfull!\n");
+        VPRINT("POOL_open () successful!\n");
     }
 
     /*
@@ -775,9 +775,9 @@ STATIC Void canny_edge_Derivative(short int *smoothedim, int rows, int cols, sho
         }
     }
 
-    /* Print if verify was succesfull */
+    /* Print if verify was successfull */
     if(DSP_SUCCEEDED(status)) {
-        VPRINT("Execution of canny_edge_Derivative was succesfull!\r\n");
+        VPRINT("Execution of canny_edge_Derivative was successfull!\r\n");
     }
     else {
         fprintf(stderr, "Execution of canny_edge_Derivative was FAILED!\r\n");
