@@ -842,7 +842,7 @@ STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Ui
     short int *verify_smoothedim=(short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
 #endif
 
-    float *tempim;           
+    float *tempim;                          /* Intermediate storing memory for x-direction*/
     float *rows_image;                     /* Image for x-smoothing*/
     float *cols_image;                    /*  Image for y-smoothing*/
     float neon_kernel[17];               /* New kernel for neon */
@@ -887,11 +887,13 @@ STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Ui
     /* Allocate the memory to new image and set the boundary value as 0. */
     rows_image = (float*)malloc(neon_cols*rows*sizeof(float));
     for( i =0; i<rows; i++){
+    	/* Set the front end 8 pixels' value as 0*/
         memset(&rows_image[i*neon_cols],0,8*sizeof(float));
 
         for( k=0; k<cols;k++){
             rows_image[i*neon_cols+8+k] = (float)image[i*cols+k];
         }
+        /* Set the back end 8 pixels' value as 0*/
         memset(&rows_image[i*neon_cols+8+cols],0,8*sizeof(float));
     }
 
@@ -916,17 +918,19 @@ STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Ui
                 {
                     e=1;
                 }
+                /*Peform the multiplication by Neon and store the partial sum in temp_dot.*/
                 neon_pixel = vld1q_f32((float32_t const *)&rows_image[r*neon_cols+c+j*4+e]);
                 neon_factor = vld1q_f32((float32_t const *)&neon_kernel[j*4+e]);
                 temp_dot = vmlaq_f32(temp_dot, neon_pixel, neon_factor);
             }
             
-    
+                /* Add up partial sum of Neon and the middle target value.*/
             dot += vgetq_lane_f32(temp_dot, 0);
             dot += vgetq_lane_f32(temp_dot, 1);
             dot += vgetq_lane_f32(temp_dot, 2);
             dot += vgetq_lane_f32(temp_dot, 3);
             dot += rows_image[r*neon_cols+c+8] * neon_kernel[8];
+               /* Assign the pixel value to the tempim and the dot as 0 again.*/
             tempim[r*cols+c] = dot/sum;
             dot=0; 
         }
@@ -940,10 +944,12 @@ STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Ui
     /* Allocate the memory to new image and set the boundary value as 0. The image is stored in unit of cols for convient y-direction smoothing*/
     cols_image = (float*)malloc(neon_rows*cols*sizeof(float));
     for( i =0; i<cols; i++){
+    	/* Set the front end 8 pixels' value as 0*/
         memset(&cols_image[i*neon_rows],0,8*sizeof(float));
         for( k=0; k<rows;k++){
             cols_image[i*neon_rows+8+k] = tempim[k*cols+i];
         }
+        /* Set the back end 8 pixels' value as 0*/
         memset(&cols_image[i*neon_rows+8+rows],0,8*sizeof(float));
     }
 
@@ -969,21 +975,24 @@ STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Ui
                 {
                     e=1;
                 }
+                /*Peform the multiplication by Neon and store the partial sum in temp_dot.*/
                 neon_pixel = vld1q_f32((float32_t const *)&cols_image[c*neon_rows+r+j*4+e]);
                 neon_factor = vld1q_f32((float32_t const *)&neon_kernel[j*4+e]);
                 temp_dot = vmlaq_f32(temp_dot,neon_pixel,neon_factor);
             }
             
-        
+            /* Add up partial sum of Neon and the middle target value.*/
             dot += vgetq_lane_f32(temp_dot, 0);
             dot += vgetq_lane_f32(temp_dot, 1);
             dot += vgetq_lane_f32(temp_dot, 2);
             dot += vgetq_lane_f32(temp_dot, 3);
             dot += cols_image[c*neon_rows+r+8] * neon_kernel[8];
+            /* Assign the pixel value to the smoothedim and the dot as 0 again.*/
             smoothedim[r*cols+c] = (short int )(dot*BOOSTBLURFACTOR/sum + 0.5);
             dot=0; 
         }
     }
+           /* Free the memory zone*/
     free(rows_image);
     free(cols_image);
     free(tempim);
