@@ -6,8 +6,8 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-
-#define VERBOSE 0
+#include "hysteresis.h"
+#include <arm_neon.h>
 
 #define NOEDGE 255
 #define POSSIBLE_EDGE 128
@@ -21,13 +21,13 @@
 * NAME: Mike Heath
 * DATE: 2/15/96
 *******************************************************************************/
-static void follow_edges(unsigned char *edgemapptr, short *edgemagptr, short lowval, int cols)
+void follow_edges(unsigned char *edgemapptr, short *edgemagptr, short lowval, int cols)
 {
     short *tempmagptr;
     unsigned char *tempmapptr;
     int i;
-    int x[8] = {1,  1,  0, -1, -1, -1,  0,  1},
-        y[8] = {0,  1,  1,  1,  0, -1, -1, -1};
+    int x[8] = {1,1,0,-1,-1,-1,0,1},
+               y[8] = {0,1,1,1,0,-1,-1,-1};
 
     for(i=0; i<8; i++)
     {
@@ -55,14 +55,19 @@ void apply_hysteresis(short int *mag, unsigned char *nms, int rows, int cols,
 {
     int r, c, pos, numedges, highcount, lowthreshold, highthreshold, hist[32768];
     short int maximum_mag=0;
-
+    int16x8_t data[2048];
+    int16x8_t numedges_128;
+    int16_t p[8];
+    int sum=0;
+    int i;
+    
     /****************************************************************************
-    * Initialize the edge map to possible edges everywhere the non-maximal
-    * suppression suggested there could be an edge except for the border. At
-    * the border we say there can not be an edge because it makes the
-    * follow_edges algorithm more efficient to not worry about tracking an
-    * edge off the side of the image.
-    ****************************************************************************/
+     * Initialize the edge map to possible edges everywhere the non-maximal
+     * suppression suggested there could be an edge except for the border. At
+     * the border we say there can not be an edge because it makes the
+     * follow_edges algorithm more efficient to not worry about tracking an
+     * edge off the side of the image.
+     ****************************************************************************/
     for(r=0,pos=0; r<rows; r++)
     {
         for(c=0; c<cols; c++,pos++)
@@ -71,7 +76,7 @@ void apply_hysteresis(short int *mag, unsigned char *nms, int rows, int cols,
             else edge[pos] = NOEDGE;
         }
     }
-
+    
     for(r=0,pos=0; r<rows; r++,pos+=cols)
     {
         edge[pos] = NOEDGE;
@@ -83,12 +88,19 @@ void apply_hysteresis(short int *mag, unsigned char *nms, int rows, int cols,
         edge[c] = NOEDGE;
         edge[pos] = NOEDGE;
     }
-
+    
     /****************************************************************************
-    * Compute the histogram of the magnitude image. Then use the histogram to
-    * compute hysteresis thresholds.
-    ****************************************************************************/
-    for(r=0; r<32768; r++) hist[r] = 0;
+     * Compute the histogram of the magnitude image. Then use the histogram to
+     * compute hysteresis thresholds.
+     ****************************************************************************/
+    //for(r=0; r<32768; r++) hist[r] = 0;
+    for(r=0;r<2048;r++)
+    {
+        data[r]=vld1q_s16((const int16_t *)&hist[r*8]);
+        data[r]=vmovq_n_s16(0);
+        vst1q_s16((int16_t *)&hist[r*8],data[r]);
+        
+    }
     for(r=0,pos=0; r<rows; r++)
     {
         for(c=0; c<cols; c++,pos++)
@@ -97,28 +109,44 @@ void apply_hysteresis(short int *mag, unsigned char *nms, int rows, int cols,
                 hist[mag[pos]]++;
         }
     }
-
+    
     /****************************************************************************
-    * Compute the number of pixels that passed the nonmaximal suppression.
-    ****************************************************************************/
+     * Compute the number of pixels that passed the nonmaximal suppression.
+     ****************************************************************************/
+    /*  for(r=1,numedges=0; r<32768; r++)
+     {
+     if(hist[r] != 0) maximum_mag = r;
+     numedges += hist[r];
+     }
+     */
     for(r=1,numedges=0; r<32768; r++)
-    {
         if(hist[r] != 0) maximum_mag = r;
-        numedges += hist[r];
+    numedges_128=vmovq_n_s16(0);
+    for(r=0;r<2048;r++)
+    {
+        data[r]=vld1q_s16((const int16_t *)&hist[r*8]);
+        numedges_128=vaddq_s16(numedges_128,data[r]);
     }
-
+    vst1q_s16(p,numedges_128);
+    
+    for(i=0;i<8;i++)
+    {
+        numedges+=(int)p[i];
+    }
+    
+    
     highcount = (int)(numedges * thigh + 0.5);
-
+    
     /****************************************************************************
-    * Compute the high threshold value as the (100 * thigh) percentage point
-    * in the magnitude of the gradient histogram of all the pixels that passes
-    * non-maximal suppression. Then calculate the low threshold as a fraction
-    * of the computed high threshold value. John Canny said in his paper
-    * "A Computational Approach to Edge Detection" that "The ratio of the
-    * high to low threshold in the implementation is in the range two or three
-    * to one." That means that in terms of this implementation, we should
-    * choose tlow ~= 0.5 or 0.33333.
-    ****************************************************************************/
+     * Compute the high threshold value as the (100 * thigh) percentage point
+     * in the magnitude of the gradient histogram of all the pixels that passes
+     * non-maximal suppression. Then calculate the low threshold as a fraction
+     * of the computed high threshold value. John Canny said in his paper
+     * "A Computational Approach to Edge Detection" that "The ratio of the
+     * high to low threshold in the implementation is in the range two or three
+     * to one." That means that in terms of this implementation, we should
+     * choose tlow ~= 0.5 or 0.33333.
+     ****************************************************************************/
     r = 1;
     numedges = hist[1];
     while((r<(maximum_mag-1)) && (numedges < highcount))
@@ -128,19 +156,18 @@ void apply_hysteresis(short int *mag, unsigned char *nms, int rows, int cols,
     }
     highthreshold = r;
     lowthreshold = (int)(highthreshold * tlow + 0.5);
-
-    if(VERBOSE)
-    {
-        printf("The input low and high fractions of %f and %f computed to\n",
-               tlow, thigh);
-        printf("magnitude of the gradient threshold values of: %d %d\n",
-               lowthreshold, highthreshold);
-    }
-
+    
+#ifdef VERBOSE
+    printf("The input low and high fractions of %f and %f computed to\n",
+           tlow, thigh);
+    printf("magnitude of the gradient threshold values of: %d %d\n",
+           lowthreshold, highthreshold);
+#endif
+    
     /****************************************************************************
-    * This loop looks for pixels above the highthreshold to locate edges and
-    * then calls follow_edges to continue the edge.
-    ****************************************************************************/
+     * This loop looks for pixels above the highthreshold to locate edges and
+     * then calls follow_edges to continue the edge.
+     ****************************************************************************/
     for(r=0,pos=0; r<rows; r++)
     {
         for(c=0; c<cols; c++,pos++)
@@ -152,14 +179,15 @@ void apply_hysteresis(short int *mag, unsigned char *nms, int rows, int cols,
             }
         }
     }
-
+    
     /****************************************************************************
-    * Set all the remaining possible edges to non-edges.
-    ****************************************************************************/
+     * Set all the remaining possible edges to non-edges.
+     ****************************************************************************/
     for(r=0,pos=0; r<rows; r++)
     {
         for(c=0; c<cols; c++,pos++) if(edge[pos] != EDGE) edge[pos] = NOEDGE;
     }
+    
 }
 
 /*******************************************************************************
@@ -186,13 +214,13 @@ void non_max_supp(short *mag, short *gradx, short *grady, int nrows, int ncols, 
     for(count=0,resultrowptr=result,resultptr=result+ncols*(nrows-1);
             count<ncols; resultptr++,resultrowptr++,count++)
     {
-        *resultrowptr = *resultptr = (unsigned char) NOEDGE;
+        *resultrowptr = *resultptr = (unsigned char) 0;
     }
 
     for(count=0,resultptr=result,resultrowptr=result+ncols-1;
             count<nrows; count++,resultptr+=ncols,resultrowptr+=ncols)
     {
-        *resultptr = *resultrowptr = (unsigned char) NOEDGE;
+        *resultptr = *resultrowptr = (unsigned char) 0;
     }
 
     /****************************************************************************
