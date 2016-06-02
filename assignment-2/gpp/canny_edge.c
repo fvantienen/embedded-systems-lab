@@ -38,7 +38,7 @@ extern "C" {
 
 #define DERIVATIVE_PARALLEL 1 /* Enable to use DSP & GPP/NEON in parallel */
 #define DERIVATIVE_PERCENTAGE 50 /* Percentage to calculate on the GPP*/
-#define DERIVATIVE_NEON 0 /* Enable to use NEON instead of GPP */
+#define DERIVATIVE_NEON 1 /* Enable to use NEON instead of GPP */
 
 /* Enable verbose printing by default */
 #ifndef VERBOSE
@@ -738,7 +738,7 @@ STATIC Void canny_edge_Derivative(short int *smoothedim, int rows, int cols, sho
     NOTIFY_notify (processorId, canny_edge_IPS_ID, canny_edge_IPS_EVENTNO, canny_edge_DERIVATIVE);
     VPRINT("  canny_edge_Derivative send, waiting for response...\r\n");
 #if DERIVATIVE_NEON
-    derivative_x_y_neon(smoothedim, rows, cols, delta_x, delta_y, percentage)
+    derivative_x_y_neon(smoothedim, rows, cols, delta_x, delta_y, percentage);
 #else
     derivative_x_y(smoothedim, rows, cols, delta_x, delta_y, percentage);
 #endif
@@ -1066,14 +1066,13 @@ STATIC void derivative_x_y_neon(short int *smoothedim, int rows, int cols, short
       fprintf(stderr, "Error allocating the delta_y image.\n");
       exit(1);
    }
-
-   for(r = rows*(100 - *percentage)/100;r<rows;r++){
+    VPRINT("Computing the x-derivative using Neon.\n");
+   for(r = 0;r < rows;r++){
       pos = r * cols;
       delta_x[pos] = smoothedim[pos+1] - smoothedim[pos];
       pos++;
       // begin Neon acceleration
       // stop when the rest elements in the row is less than 4
-      VPRINT("Computing the x-derivative using Neon.\n");
       for(c=1;c<(cols-(cols-1)%4);c+=4,pos+=4){
    	    int16x4_t vector_smoothedim_1, vector_smoothedim_2, vector_delta_x;
    	    // load the operands from memory to the Neon vectors
@@ -1082,15 +1081,15 @@ STATIC void derivative_x_y_neon(short int *smoothedim, int rows, int cols, short
         // do the operation to the operands (SIMD)
         vector_delta_x = vsub_s16(vector_smoothedim_1, vector_smoothedim_2);
         // store the result from the Neon vector to the memory
-        vst1_s16(&((*delta_x)[pos]), vector_delta_x);
+        vst1_s16(&(delta_x[pos]), vector_delta_x);
       }
       // process the rest elements in the row in the regualar way
       while(c<cols-1){
-        (*delta_x)[pos] = smoothedim[pos+1] - smoothedim[pos-1];
+        delta_x[pos] = smoothedim[pos+1] - smoothedim[pos-1];
         c++;
         pos++;
   	  }
-      (*delta_x)[pos] = smoothedim[pos] - smoothedim[pos-1];
+      delta_x[pos] = smoothedim[pos] - smoothedim[pos-1];
    }
 
     VPRINT("Computing the y-derivative using Neon.\n");
@@ -1100,18 +1099,18 @@ STATIC void derivative_x_y_neon(short int *smoothedim, int rows, int cols, short
       vector_smoothedim_3 = vld1_s16(&(smoothedim[pos+cols]));
       vector_smoothedim_4 = vld1_s16(&(smoothedim[pos]));
       vector_delta_y = vsub_s16(vector_smoothedim_3, vector_smoothedim_4);
-      vst1_s16(&((*delta_y)[pos]), vector_delta_y);
+      vst1_s16(&(delta_y[pos]), vector_delta_y);
       pos += cols;
       for(r=1;r<(rows-1);r++,pos+=cols){  
         vector_smoothedim_3 = vld1_s16(&(smoothedim[pos+cols]));
         vector_smoothedim_4 = vld1_s16(&(smoothedim[pos-cols]));
         vector_delta_y = vsub_s16(vector_smoothedim_3, vector_smoothedim_4);
-        vst1_s16(&((*delta_y)[pos]), vector_delta_y);
+        vst1_s16(&(delta_y[pos]), vector_delta_y);
     }
     vector_smoothedim_3 = vld1_s16(&(smoothedim[pos]));
     vector_smoothedim_4 = vld1_s16(&(smoothedim[pos-cols]));
     vector_delta_y = vsub_s16(vector_smoothedim_3, vector_smoothedim_4);
-    vst1_s16(&((*delta_y)[pos]), vector_delta_y);
+    vst1_s16(&(delta_y[pos]), vector_delta_y);
     }
 
 #if VERIFY
@@ -1123,7 +1122,7 @@ STATIC void derivative_x_y_neon(short int *smoothedim, int rows, int cols, short
     for(i = 0; i < rows*cols; i++) {
         if(delta_x[i] != verify_delta_x[i]) {
             fprintf(stderr, "Got incorrect delta_x using Neon! Expected %d, Got %d (i: %d)\r\n", verify_delta_x[i], delta_x[i], i);
-            derivative_neon_fail = 1;
+            status = DSP_EFAIL;
         }
     }
 
@@ -1131,7 +1130,7 @@ STATIC void derivative_x_y_neon(short int *smoothedim, int rows, int cols, short
     for(i = 0; i < rows*cols; i++) {
         if(delta_y[i] != verify_delta_y[i]) {
             fprintf(stderr, "Got incorrect delta_y using Neon! Expected %d, Got %d (i: %d)\r\n", verify_delta_y[i], delta_y[i], i);
-            derivative_neon_fail = 1;
+            status = DSP_EFAIL;
         }
     }
 
