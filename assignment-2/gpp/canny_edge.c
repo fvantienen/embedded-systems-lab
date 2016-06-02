@@ -31,12 +31,14 @@ extern "C" {
 /* Enable / Disable DSP/NEON */
 #define GAUSSIAN_DSP 0
 #define GUASSIAN_NEON 0
-#define DERIVATIVE_DSP 0
-#define DERIVATIVE_NEON 1
 
-#define MAGNITUDE_PARALLEL 1
-#define MAGNITUDE_PERCENTAGE 50
-#define MAGNITUDE_NEON 1
+#define MAGNITUDE_PARALLEL 1 /* Enable to use DSP & GPP/NEON in parallel */
+#define MAGNITUDE_PERCENTAGE 50 /* Percentage to calculate on the GPP*/
+#define MAGNITUDE_NEON 1 /* Enable to use NEON instead of GPP */
+
+#define DERIVATIVE_PARALLEL 1 /* Enable to use DSP & GPP/NEON in parallel */
+#define DERIVATIVE_PERCENTAGE 50 /* Percentage to calculate on the GPP*/
+#define DERIVATIVE_NEON 0 /* Enable to use NEON instead of GPP */
 
 /* Enable verbose printing by default */
 #ifndef VERBOSE
@@ -57,7 +59,7 @@ extern "C" {
 #define NUM_BUF_POOL2                    1 ///< Amount of buffers in the thrid pool
 #define NUM_BUF_POOL3                    1 ///< Amount of buffers in the fourth pool
 #define NUM_BUF_POOL4                    1 ///< Amount of buffers in the fifth pool
-#define NUM_BUF_POOL5                    1 ///< Amount of buffers in the sixt pool
+#define NUM_BUF_POOL5                    1 ///< Amount of buffers in the sixth pool
 #define NUM_BUF_MAX                      1 ///< Maximum amount of buffers in pool
 #define canny_edge_IPS_ID                0 ///< IPS ID used for sending notifications to the DPS
 #define canny_edge_IPS_EVENTNO           5 ///< Event number used for notifications to the DSP
@@ -109,19 +111,19 @@ int windowsize_kernel = 15; /* Dimension of the gaussian kernel. */
 STATIC Void canny_edge_Notify(Uint32 eventNo, Pvoid arg, Pvoid info);
 STATIC Void canny_edge_Writeback(unsigned char *image, int rows, int cols, Uint8 processorId);
 STATIC Void canny_edge_Gaussian(unsigned char *image, int rows, int cols, short int *smoothedim, Uint8 processorId);
-STATIC Void canny_edge_Derivative(short int *smoothedim, int rows, int cols, short int *delta_x, short int *delta_y, Uint8 processorId);
+STATIC Void canny_edge_Derivative(short int *smoothedim, int rows, int cols, short int *delta_x, short int *delta_y, short int *percentage, Uint8 processorId);
 STATIC Void canny_edge_Magnitude(short int *delta_x, short int *delta_y, int rows, int cols, short int *magnitude, short int *percentage, Uint8 processorId);
 
 /* Used neon functions */
 STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Uint16 rows, Uint16 cols);
-STATIC void derivative_x_y_neon(short int *smoothedim, int rows, int cols, short int **delta_x, short int **delta_y);
+STATIC void derivative_x_y_neon(short int *smoothedim, int rows, int cols, short int *delta_x, short int *delta_y, short int *percentage);
 STATIC void magnitude_x_y_neon(short int *delta_x, short int *delta_y, int rows, int cols, short int *magnitude, short int *percentage);
 
 /* Used GPP functions */
 STATIC void gaussian_smooth(unsigned char *image, short int* smoothedim, int rows, int cols);
 STATIC void make_gaussian_kernel(float sigma, float **kernel, int *windowsize);
-STATIC void derivative_x_y(short int *smoothedim, int rows, int cols, short int **delta_x, short int **delta_y);
 STATIC void magnitude_x_y(short int *delta_x, short int *delta_y, int rows, int cols, short int *magnitude, short int *percentage);
+STATIC void derivative_x_y(short int *smoothedim, int rows, int cols, short int *delta_x, short int *delta_y, short int *percentage);
 STATIC double angle_radians(double x, double y);
 
 
@@ -365,12 +367,13 @@ NORMAL_API DSP_STATUS canny_edge_Execute (Uint8 processorId, IN Char8 * strImage
     short int *magnitude = (short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
     unsigned char *nms = (unsigned char *)malloc(sizeof(unsigned char) * canny_edge_rows * canny_edge_cols);
     unsigned char *edge = (unsigned char *)malloc(sizeof(unsigned char) * canny_edge_rows * canny_edge_cols);
-    short int *percentage = (short int *)buffers[5][0];
+    short int *percentage = (short int *)buffers[5][0]; 
     char outfilename[128];    /* Name of the output "edge" image */
 #if VERIFY
     int i, windowsize;
     float *kernel;
 #endif
+    /* Distribute PERCENTAGE_GPP of the rows to GPP and 100-PERCENTAGE_GPP to the DSP */
 
     VPRINT("Entered canny_edge_Execute ()\n");
 
@@ -412,14 +415,14 @@ NORMAL_API DSP_STATUS canny_edge_Execute (Uint8 processorId, IN Char8 * strImage
     gaussian_smooth(image, smoothedim, canny_edge_rows, canny_edge_cols);
 #endif
 
+// derivative_x_y_neon(smoothedim, canny_edge_rows, canny_edge_cols, delta_x, delta_y, percentage);
     /* Calculate the derivatives */
     VPRINT(" Starting derivative x, y\r\n");
-#if DERIVATIVE_DSP
-    canny_edge_Derivative(smoothedim, canny_edge_rows, canny_edge_cols, delta_x, delta_y, processorId);
-#elif DERIVATIVE_NEON
-    derivative_x_y_neon(smoothedim, canny_edge_rows, canny_edge_cols, &delta_x, &delta_y);
+    *percentage = DERIVATIVE_PERCENTAGE;
+#if DERIVATIVE_PARALLEL
+    canny_edge_Derivative(smoothedim, canny_edge_rows, canny_edge_cols, delta_x, delta_y, percentage, processorId);
 #else
-    derivative_x_y(smoothedim, canny_edge_rows, canny_edge_cols, &delta_x, &delta_y);
+    derivative_x_y(smoothedim, canny_edge_rows, canny_edge_cols, delta_x, delta_y, percentage);
 #endif
 
     /* Compute the magnitude */
@@ -714,7 +717,7 @@ STATIC Void canny_edge_Gaussian(unsigned char *image, int rows, int cols, short 
 #endif
 }
 
-STATIC Void canny_edge_Derivative(short int *smoothedim, int rows, int cols, short int *delta_x, short int *delta_y, Uint8 processorId)
+STATIC Void canny_edge_Derivative(short int *smoothedim, int rows, int cols, short int *delta_x, short int *delta_y, short int *percentage, Uint8 processorId)
 {
 #if VERIFY
     int i;
@@ -727,10 +730,18 @@ STATIC Void canny_edge_Derivative(short int *smoothedim, int rows, int cols, sho
     POOL_writeback (POOL_makePoolId(processorId, SAMPLE_POOL_ID),
                     smoothedim,
                     buffer_sizes[1]);
+    POOL_writeback (POOL_makePoolId(processorId, SAMPLE_POOL_ID),
+                    percentage,
+                    buffer_sizes[5]);
 
     /* Notify DSP */
     NOTIFY_notify (processorId, canny_edge_IPS_ID, canny_edge_IPS_EVENTNO, canny_edge_DERIVATIVE);
-    VPRINT("  DSP_derivative_x_y send, waiting for response...\r\n");
+    VPRINT("  canny_edge_Derivative send, waiting for response...\r\n");
+#if DERIVATIVE_NEON
+    derivative_x_y_neon(smoothedim, rows, cols, delta_x, delta_y, percentage)
+#else
+    derivative_x_y(smoothedim, rows, cols, delta_x, delta_y, percentage);
+#endif
 
      /* Wait for the response */
     sem_wait(&sem);
@@ -745,12 +756,13 @@ STATIC Void canny_edge_Derivative(short int *smoothedim, int rows, int cols, sho
 
 #if VERIFY
     /* verify with GPP function */
-    derivative_x_y(smoothedim, rows, cols, &verify_delta_x, &verify_delta_y);
-  
+    *percentage = 100;
+    derivative_x_y(smoothedim, rows, cols, verify_delta_x, verify_delta_y, percentage);
+    
     /* Check for delta_x*/
     for(i = 0; i < rows*cols; i++) {
         if(delta_x[i] != verify_delta_x[i]) {
-            fprintf(stderr, "Got incorrect delta_x result back! Expected %d, Got %d (i: %d)\r\n", verify_delta_x[i], delta_x[i], i);
+            //fprintf(stderr, "Got incorrect delta_x result back! Expected %d, Got %d (i: %d)\r\n", verify_delta_x[i], delta_x[i], i);
             status = DSP_EFAIL;
         }
     }
@@ -758,7 +770,7 @@ STATIC Void canny_edge_Derivative(short int *smoothedim, int rows, int cols, sho
     /* Check for delta_y*/
     for(i = 0; i < rows*cols; i++) {
         if(delta_y[i] != verify_delta_y[i]) {
-            fprintf(stderr, "Got incorrect delta_y result back! Expected %d, Got %d (i: %d)\r\n", verify_delta_y[i], delta_y[i], i);
+            //fprintf(stderr, "Got incorrect delta_y result back! Expected %d, Got %d (i: %d)\r\n", verify_delta_y[i], delta_y[i], i);
             status = DSP_EFAIL;
         }
     }
@@ -1033,7 +1045,7 @@ STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Ui
 
 }
 
-STATIC void derivative_x_y_neon(short int *smoothedim, int rows, int cols, short int **delta_x, short int **delta_y)
+STATIC void derivative_x_y_neon(short int *smoothedim, int rows, int cols, short int *delta_x, short int *delta_y, short int *percentage)
 {
 #if VERIFY
     int i;
@@ -1046,78 +1058,80 @@ STATIC void derivative_x_y_neon(short int *smoothedim, int rows, int cols, short
    /****************************************************************************
    * Allocate images to store the derivatives.
    ****************************************************************************/
-   if(((*delta_x) = (short *) malloc(rows*cols* sizeof(short))) == NULL){
+   if((delta_x = (short *) malloc(rows*cols* sizeof(short))) == NULL){
       fprintf(stderr, "Error allocating the delta_x image.\n");
       exit(1);
    }
-   if(((*delta_y) = (short *) malloc(rows*cols* sizeof(short))) == NULL){
+   if((delta_y = (short *) malloc(rows*cols* sizeof(short))) == NULL){
       fprintf(stderr, "Error allocating the delta_y image.\n");
       exit(1);
    }
 
-   for(r=0;r<rows;r++){
+   for(r = rows*(100 - *percentage)/100;r<rows;r++){
       pos = r * cols;
-      (*delta_x)[pos] = smoothedim[pos+1] - smoothedim[pos];
+      delta_x[pos] = smoothedim[pos+1] - smoothedim[pos];
       pos++;
       // begin Neon acceleration
       // stop when the rest elements in the row is less than 4
+      VPRINT("Computing the x-derivative using Neon.\n");
       for(c=1;c<(cols-(cols-1)%4);c+=4,pos+=4){
-   	  int16x4_t vector_smoothedim_1, vector_smoothedim_2, vector_delta_x;
-   	  // load the operands from memory to the Neon vectors
-      vector_smoothedim_1 = vld1_s16(&(smoothedim[pos+1]));
-      vector_smoothedim_2 = vld1_s16(&(smoothedim[pos-1]));
-      // do the operation to the operands (SIMD)
-      vector_delta_x = vsub_s16(vector_smoothedim_1, vector_smoothedim_2);
-      // store the result from the Neon vector to the memory
-      vst1_s16(&((*delta_x)[pos]), vector_delta_x);
+   	    int16x4_t vector_smoothedim_1, vector_smoothedim_2, vector_delta_x;
+   	    // load the operands from memory to the Neon vectors
+        vector_smoothedim_1 = vld1_s16(&(smoothedim[pos+1]));
+        vector_smoothedim_2 = vld1_s16(&(smoothedim[pos-1]));
+        // do the operation to the operands (SIMD)
+        vector_delta_x = vsub_s16(vector_smoothedim_1, vector_smoothedim_2);
+        // store the result from the Neon vector to the memory
+        vst1_s16(&((*delta_x)[pos]), vector_delta_x);
       }
       // process the rest elements in the row in the regualar way
       while(c<cols-1){
-      (*delta_x)[pos] = smoothedim[pos+1] - smoothedim[pos-1];
-      c++;
-      pos++;
+        (*delta_x)[pos] = smoothedim[pos+1] - smoothedim[pos-1];
+        c++;
+        pos++;
   	  }
       (*delta_x)[pos] = smoothedim[pos] - smoothedim[pos-1];
    }
 
-   	printf("Computing the derivative using Neon.\n");
+    VPRINT("Computing the y-derivative using Neon.\n");
     for(c=0;c<cols;c+=4){
-   	int16x4_t vector_smoothedim_3, vector_smoothedim_4, vector_delta_y;
-   	pos = c;
-	vector_smoothedim_3 = vld1_s16(&(smoothedim[pos+cols]));
-   	vector_smoothedim_4 = vld1_s16(&(smoothedim[pos]));
-   	vector_delta_y = vsub_s16(vector_smoothedim_3, vector_smoothedim_4);
-   	vst1_s16(&((*delta_y)[pos]), vector_delta_y);
-	pos += cols;
-	for(r=1;r<(rows-1);r++,pos+=cols){ 	
-   	vector_smoothedim_3 = vld1_s16(&(smoothedim[pos+cols]));
-   	vector_smoothedim_4 = vld1_s16(&(smoothedim[pos-cols]));
-   	vector_delta_y = vsub_s16(vector_smoothedim_3, vector_smoothedim_4);
-   	vst1_s16(&((*delta_y)[pos]), vector_delta_y);
-   }
-	vector_smoothedim_3 = vld1_s16(&(smoothedim[pos]));
-   	vector_smoothedim_4 = vld1_s16(&(smoothedim[pos-cols]));
-   	vector_delta_y = vsub_s16(vector_smoothedim_3, vector_smoothedim_4);
-   	vst1_s16(&((*delta_y)[pos]), vector_delta_y);
-   }
+      int16x4_t vector_smoothedim_3, vector_smoothedim_4, vector_delta_y;
+      pos = c;
+      vector_smoothedim_3 = vld1_s16(&(smoothedim[pos+cols]));
+      vector_smoothedim_4 = vld1_s16(&(smoothedim[pos]));
+      vector_delta_y = vsub_s16(vector_smoothedim_3, vector_smoothedim_4);
+      vst1_s16(&((*delta_y)[pos]), vector_delta_y);
+      pos += cols;
+      for(r=1;r<(rows-1);r++,pos+=cols){  
+        vector_smoothedim_3 = vld1_s16(&(smoothedim[pos+cols]));
+        vector_smoothedim_4 = vld1_s16(&(smoothedim[pos-cols]));
+        vector_delta_y = vsub_s16(vector_smoothedim_3, vector_smoothedim_4);
+        vst1_s16(&((*delta_y)[pos]), vector_delta_y);
+    }
+    vector_smoothedim_3 = vld1_s16(&(smoothedim[pos]));
+    vector_smoothedim_4 = vld1_s16(&(smoothedim[pos-cols]));
+    vector_delta_y = vsub_s16(vector_smoothedim_3, vector_smoothedim_4);
+    vst1_s16(&((*delta_y)[pos]), vector_delta_y);
+    }
 
 #if VERIFY
     /* verify with GPP function */
-    derivative_x_y(smoothedim, rows, cols, &verify_delta_x, &verify_delta_y);
+    *percentage = 100;
+    derivative_x_y(smoothedim, rows, cols, verify_delta_x, verify_delta_y, percentage);
   
     /* Check for delta_x*/
     for(i = 0; i < rows*cols; i++) {
-        if((*delta_x)[i] != verify_delta_x[i]) {
-            fprintf(stderr, "Got incorrect delta_x using Neon! Expected %d, Got %d (i: %d)\r\n", verify_delta_x[i], (*delta_x)[i], i);
-            status = DSP_EFAIL;
+        if(delta_x[i] != verify_delta_x[i]) {
+            fprintf(stderr, "Got incorrect delta_x using Neon! Expected %d, Got %d (i: %d)\r\n", verify_delta_x[i], delta_x[i], i);
+            derivative_neon_fail = 1;
         }
     }
 
     /* Check for delta_y*/
     for(i = 0; i < rows*cols; i++) {
-        if((*delta_y)[i] != verify_delta_y[i]) {
-            fprintf(stderr, "Got incorrect delta_y using Neon! Expected %d, Got %d (i: %d)\r\n", verify_delta_y[i], (*delta_y)[i], i);
-            status = DSP_EFAIL;
+        if(delta_y[i] != verify_delta_y[i]) {
+            fprintf(stderr, "Got incorrect delta_y using Neon! Expected %d, Got %d (i: %d)\r\n", verify_delta_y[i], delta_y[i], i);
+            derivative_neon_fail = 1;
         }
     }
 
@@ -1234,30 +1248,32 @@ STATIC void magnitude_x_y(short int *delta_x, short int *delta_y, int rows, int 
 * NAME: Mike Heath
 * DATE: 2/15/96
 *******************************************************************************/
-STATIC void derivative_x_y(short int *smoothedim, int rows, int cols,
-        short int **delta_x, short int **delta_y)
+STATIC void derivative_x_y(short int *smoothedim, int rows, int cols, short int *delta_x, short int *delta_y, short int *percentage)
 {
+   /*   Percentage indicates how many rows will be calculated on the GPP. The GPP will    */
+   /*   be given an offset when not all calculations are done on the GPP (percentage<100) */
    int r, c, pos;
-   // Calculate the X direction
-   for(r=0;r<rows;r++){
+   /* Calculate the X direction */
+   for(r = rows*(100 - *percentage)/100;r < rows; r++){
       pos = r * cols;
-      (*delta_x)[pos] = smoothedim[pos+1] - smoothedim[pos];
+      delta_x[pos] = smoothedim[pos+1] - smoothedim[pos];
       pos++;
-      for(c=1;c<(cols-1);c++,pos++){
-         (*delta_x)[pos] = smoothedim[pos+1] - smoothedim[pos-1];
+      for(c = 1; c < (cols - 1); c++, pos++){
+         delta_x[pos] = smoothedim[pos+1] - smoothedim[pos-1];
       }
-      (*delta_x)[pos] = smoothedim[pos] - smoothedim[pos-1];
+      delta_x[pos] = smoothedim[pos] - smoothedim[pos-1];
    }
 
-   // Calculate the Y direction
-   for(c=0;c<cols;c++){
+   /* Calculate the Y direction */
+   for(c = cols*(100 - *percentage)/100; c < cols; c++){
       pos = c;
-      (*delta_y)[pos] = smoothedim[pos+cols] - smoothedim[pos];
+      delta_y[pos] = smoothedim[pos+cols] - smoothedim[pos];
       pos += cols;
-      for(r=1;r<(rows-1);r++,pos+=cols){
-         (*delta_y)[pos] = smoothedim[pos+cols] - smoothedim[pos-cols];
+      // Mistake is somewhere here (only delta_y!)
+      for(r=1;r < (rows-1); r++, pos += cols){
+         delta_y[pos] = smoothedim[pos+cols] - smoothedim[pos-cols];
       }
-      (*delta_y)[pos] = smoothedim[pos] - smoothedim[pos-cols];
+      delta_y[pos] = smoothedim[pos] - smoothedim[pos-cols];
    }
 }
 
