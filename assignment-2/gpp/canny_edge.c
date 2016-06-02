@@ -31,8 +31,8 @@ extern "C" {
 /* Enable / Disable DSP/NEON */
 #define GAUSSIAN_DSP 0
 #define GUASSIAN_NEON 0
-#define DERIVATIVE_DSP 1
-#define DERIVATIVE_NEON 0
+#define DERIVATIVE_DSP 0
+#define DERIVATIVE_NEON 1
 
 #define MAGNITUDE_PARALLEL 1
 #define MAGNITUDE_PERCENTAGE 50
@@ -1059,11 +1059,26 @@ STATIC void derivative_x_y_neon(short int *smoothedim, int rows, int cols, short
       pos = r * cols;
       (*delta_x)[pos] = smoothedim[pos+1] - smoothedim[pos];
       pos++;
-      for(c=1;c<(cols-1);c++,pos++){
-         (*delta_x)[pos] = smoothedim[pos+1] - smoothedim[pos-1];
+      // begin Neon acceleration
+      // stop when the rest elements in the row is less than 4
+      for(c=1;c<(cols-(cols-1)%4);c+=4,pos+=4){
+   	  int16x4_t vector_smoothedim_1, vector_smoothedim_2, vector_delta_x;
+   	  // load the operands from memory to the Neon vectors
+      vector_smoothedim_1 = vld1_s16(&(smoothedim[pos+1]));
+      vector_smoothedim_2 = vld1_s16(&(smoothedim[pos-1]));
+      // do the operation to the operands (SIMD)
+      vector_delta_x = vsub_s16(vector_smoothedim_1, vector_smoothedim_2);
+      // store the result from the Neon vector to the memory
+      vst1_s16(&((*delta_x)[pos]), vector_delta_x);
       }
+      // process the rest elements in the row in the regualar way
+      while(c<cols-1){
+      (*delta_x)[pos] = smoothedim[pos+1] - smoothedim[pos-1];
+      c++;
+      pos++;
+  	  }
       (*delta_x)[pos] = smoothedim[pos] - smoothedim[pos-1];
-   }  
+   }
 
    	printf("Computing the derivative using Neon.\n");
     for(c=0;c<cols;c+=4){
