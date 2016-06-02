@@ -70,10 +70,10 @@ int write_pgm_image(char *outfilename, unsigned char *image, int rows,
 
 void canny(unsigned char *image, int rows, int cols, float sigma,
            float tlow, float thigh, unsigned char **edge, char *fname);
-short int* gaussian_smooth(unsigned char *image, int rows, int cols, float sigma);
+short int *gaussian_smooth(unsigned char *image, int rows, int cols, float sigma);
 void make_gaussian_kernel(float sigma, float **kernel, int *windowsize);
 void derrivative_x_y(short int *smoothedim, int rows, int cols,
-        short int **delta_x, short int **delta_y);
+                     short int **delta_x, short int **delta_y);
 void magnitude_x_y(short int *delta_x, short int *delta_y, int rows, int cols,
                    short int *magnitude);
 void apply_hysteresis(short int *mag, unsigned char *nms, int rows, int cols,
@@ -94,22 +94,21 @@ int main(int argc, char *argv[])
     unsigned char *image;     /* The input image */
     unsigned char *edge;      /* The output edge image */
     int rows, cols;           /* The dimensions of the image. */
-    float sigma=2.5,              /* Standard deviation of the gaussian kernel. */
-          tlow=0.5,               /* Fraction of the high threshold in hysteresis. */
-          thigh=0.5;              /* High hysteresis threshold control. The actual
-			        threshold is the (100 * thigh) percentage point
-			        in the histogram of the magnitude of the
-			        gradient image that passes non-maximal
-			        suppression. */
+    float sigma = 2.5,            /* Standard deviation of the gaussian kernel. */
+          tlow = 0.5,             /* Fraction of the high threshold in hysteresis. */
+          thigh = 0.5;              /* High hysteresis threshold control. The actual
+                    threshold is the (100 * thigh) percentage point
+                    in the histogram of the magnitude of the
+                    gradient image that passes non-maximal
+                    suppression. */
 
     /****************************************************************************
     * Get the command line arguments.
     ****************************************************************************/
-    if(argc < 2)
-    {
-        fprintf(stderr,"\n<USAGE> %s image sigma tlow thigh [writedirim]\n",argv[0]);
-        fprintf(stderr,"\n      image:      An image to process. Must be in ");
-        fprintf(stderr,"PGM format.\n");
+    if (argc < 2) {
+        fprintf(stderr, "\n<USAGE> %s image sigma tlow thigh [writedirim]\n", argv[0]);
+        fprintf(stderr, "\n      image:      An image to process. Must be in ");
+        fprintf(stderr, "PGM format.\n");
         exit(1);
     }
 
@@ -121,9 +120,8 @@ int main(int argc, char *argv[])
     /****************************************************************************
     * Read in the image. This read function allocates memory for the image.
     ****************************************************************************/
-    if(VERBOSE) printf("Reading the image %s.\n", infilename);
-    if(read_pgm_image(infilename, &image, &rows, &cols) == 0)
-    {
+    if (VERBOSE) { printf("Reading the image %s.\n", infilename); }
+    if (read_pgm_image(infilename, &image, &rows, &cols) == 0) {
         fprintf(stderr, "Error reading the input image, %s.\n", infilename);
         exit(1);
     }
@@ -131,9 +129,8 @@ int main(int argc, char *argv[])
     /****************************************************************************
     * Perform the edge detection. All of the work takes place here.
     ****************************************************************************/
-    if(VERBOSE) printf("Starting Canny edge detection.\n");
-    if(dirfilename != NULL)
-    {
+    if (VERBOSE) { printf("Starting Canny edge detection.\n"); }
+    if (dirfilename != NULL) {
         sprintf(composedfname, "%s_s_%3.2f_l_%3.2f_h_%3.2f.fim", infilename,
                 sigma, tlow, thigh);
         dirfilename = composedfname;
@@ -152,9 +149,8 @@ int main(int argc, char *argv[])
     ****************************************************************************/
     sprintf(outfilename, "%s_s_%3.2f_l_%3.2f_h_%3.2f.pgm", infilename,
             sigma, tlow, thigh);
-    if(VERBOSE) printf("Writing the edge iname in the file %s.\n", outfilename);
-    if(write_pgm_image(outfilename, edge, rows, cols, "", 255) == 0)
-    {
+    if (VERBOSE) { printf("Writing the edge iname in the file %s.\n", outfilename); }
+    if (write_pgm_image(outfilename, edge, rows, cols, "", 255) == 0) {
         fprintf(stderr, "Error writing the edge image, %s.\n", outfilename);
         exit(1);
     }
@@ -173,25 +169,25 @@ int main(int argc, char *argv[])
 void canny(unsigned char *image, int rows, int cols, float sigma,
            float tlow, float thigh, unsigned char **edge, char *fname)
 {
-    FILE *fpdir=NULL;          /* File to write the gradient image to.     */
+    FILE *fpdir = NULL;        /* File to write the gradient image to.     */
     unsigned char *nms;        /* Points that are local maximal magnitude. */
     short int *smoothedim,     /* The image after gaussian smoothing.      */
           *delta_x,        /* The first devivative image, x-direction. */
           *delta_y,        /* The first derivative image, y-direction. */
           *magnitude;      /* The magnitude of the gadient image.      */
-    float *dir_radians=NULL;   /* Gradient direction image.                */
+    float *dir_radians = NULL; /* Gradient direction image.                */
 
     /****************************************************************************
     * Perform gaussian smoothing on the image using the input standard
     * deviation.
     ****************************************************************************/
-    if(VERBOSE) printf("Smoothing the image using a gaussian kernel.\n");
+    if (VERBOSE) { printf("Smoothing the image using a gaussian kernel.\n"); }
     smoothedim = gaussian_smooth(image, rows, cols, sigma);
 
     /****************************************************************************
     * Compute the first derivative in the x and y directions.
     ****************************************************************************/
-    if(VERBOSE) printf("Computing the X and Y first derivatives.\n");
+    if (VERBOSE) { printf("Computing the X and Y first derivatives.\n"); }
     derrivative_x_y(smoothedim, rows, cols, &delta_x, &delta_y);
 
     /****************************************************************************
@@ -199,8 +195,7 @@ void canny(unsigned char *image, int rows, int cols, float sigma,
     * to make the information available for computing an edge quality figure
     * of merit.
     ****************************************************************************/
-    if(fname != NULL)
-    {
+    if (fname != NULL) {
         /*************************************************************************
         * Compute the direction up the gradient, in radians that are
         * specified counteclockwise from the positive x-axis.
@@ -210,12 +205,11 @@ void canny(unsigned char *image, int rows, int cols, float sigma,
         /*************************************************************************
         * Write the gradient direction image out to a file.
         *************************************************************************/
-        if((fpdir = fopen(fname, "wb")) == NULL)
-        {
+        if ((fpdir = fopen(fname, "wb")) == NULL) {
             fprintf(stderr, "Error opening the file %s for writing.\n", fname);
             exit(1);
         }
-        fwrite(dir_radians, sizeof(float), rows*cols, fpdir);
+        fwrite(dir_radians, sizeof(float), rows * cols, fpdir);
         fclose(fpdir);
         free(dir_radians);
     }
@@ -226,21 +220,19 @@ void canny(unsigned char *image, int rows, int cols, float sigma,
     /****************************************************************************
     * Allocate an image to store the magnitude of the gradient.
     ****************************************************************************/
-    if((magnitude = (short *) malloc(rows*cols* sizeof(short))) == NULL)
-    {
+    if ((magnitude = (short *) malloc(rows * cols * sizeof(short))) == NULL) {
         fprintf(stderr, "Error allocating the magnitude image.\n");
         exit(1);
     }
 
-    if(VERBOSE) printf("Computing the magnitude of the gradient.\n");
+    if (VERBOSE) { printf("Computing the magnitude of the gradient.\n"); }
     magnitude_x_y(delta_x, delta_y, rows, cols, magnitude);
 
     /****************************************************************************
     * Perform non-maximal suppression.
     ****************************************************************************/
-    if(VERBOSE) printf("Doing the non-maximal suppression.\n");
-    if((nms = (unsigned char *) malloc(rows*cols*sizeof(unsigned char)))==NULL)
-    {
+    if (VERBOSE) { printf("Doing the non-maximal suppression.\n"); }
+    if ((nms = (unsigned char *) malloc(rows * cols * sizeof(unsigned char))) == NULL) {
         fprintf(stderr, "Error allocating the nms image.\n");
         exit(1);
     }
@@ -249,9 +241,8 @@ void canny(unsigned char *image, int rows, int cols, float sigma,
     /****************************************************************************
     * Use hysteresis to mark the edge pixels.
     ****************************************************************************/
-    if(VERBOSE) printf("Doing hysteresis thresholding.\n");
-    if( (*edge=(unsigned char *)malloc(rows*cols*sizeof(unsigned char))) == NULL )
-    {
+    if (VERBOSE) { printf("Doing hysteresis thresholding.\n"); }
+    if ((*edge = (unsigned char *)malloc(rows * cols * sizeof(unsigned char))) == NULL) {
         fprintf(stderr, "Error allocating the edge image.\n");
         exit(1);
     }
@@ -287,28 +278,25 @@ void radian_direction(short int *delta_x, short int *delta_y, int rows,
                       int cols, float **dir_radians, int xdirtag, int ydirtag)
 {
     int r, c, pos;
-    float *dirim=NULL;
+    float *dirim = NULL;
     double dx, dy;
 
     /****************************************************************************
     * Allocate an image to store the direction of the gradient.
     ****************************************************************************/
-    if((dirim = (float *) malloc(rows*cols* sizeof(float))) == NULL)
-    {
+    if ((dirim = (float *) malloc(rows * cols * sizeof(float))) == NULL) {
         fprintf(stderr, "Error allocating the gradient direction image.\n");
         exit(1);
     }
     *dir_radians = dirim;
 
-    for(r=0,pos=0; r<rows; r++)
-    {
-        for(c=0; c<cols; c++,pos++)
-        {
+    for (r = 0, pos = 0; r < rows; r++) {
+        for (c = 0; c < cols; c++, pos++) {
             dx = (double)delta_x[pos];
             dy = (double)delta_y[pos];
 
-            if(xdirtag == 1) dx = -dx;
-            if(ydirtag == -1) dy = -dy;
+            if (xdirtag == 1) { dx = -dx; }
+            if (ydirtag == -1) { dy = -dy; }
 
             dirim[pos] = (float)angle_radians(dx, dy);
         }
@@ -328,19 +316,16 @@ double angle_radians(double x, double y)
     xu = fabs(x);
     yu = fabs(y);
 
-    if((xu == 0) && (yu == 0)) return(0);
+    if ((xu == 0) && (yu == 0)) { return (0); }
 
-    ang = atan(yu/xu);
+    ang = atan(yu / xu);
 
-    if(x >= 0)
-    {
-        if(y >= 0) return(ang);
-        else return(2*M_PI - ang);
-    }
-    else
-    {
-        if(y >= 0) return(M_PI - ang);
-        else return(M_PI + ang);
+    if (x >= 0) {
+        if (y >= 0) { return (ang); }
+        else { return (2 * M_PI - ang); }
+    } else {
+        if (y >= 0) { return (M_PI - ang); }
+        else { return (M_PI + ang); }
     }
 }
 
@@ -356,10 +341,8 @@ void magnitude_x_y(short int *delta_x, short int *delta_y, int rows, int cols,
 {
     int r, c, pos, sq1, sq2;
 
-    for(r=0,pos=0; r<rows; r++)
-    {
-        for(c=0; c<cols; c++,pos++)
-        {
+    for (r = 0, pos = 0; r < rows; r++) {
+        for (c = 0; c < cols; c++, pos++) {
             sq1 = (int)delta_x[pos] * (int)delta_x[pos];
             sq2 = (int)delta_y[pos] * (int)delta_y[pos];
             magnitude[pos] = (short)(0.5 + sqrt((float)sq1 + (float)sq2));
@@ -381,41 +364,41 @@ void magnitude_x_y(short int *delta_x, short int *delta_y, int rows, int cols,
 * DATE: 2/15/96
 *******************************************************************************/
 void derrivative_x_y(short int *smoothedim, int rows, int cols,
-        short int **delta_x, short int **delta_y)
+                     short int **delta_x, short int **delta_y)
 {
-   int r, c, pos;
-   /****************************************************************************
-   * Allocate images to store the derivatives.
-   ****************************************************************************/
-   if(((*delta_x) = (short *) malloc(rows*cols* sizeof(short))) == NULL){
-      fprintf(stderr, "Error allocating the delta_x image.\n");
-      exit(1);
-   }
-   if(((*delta_y) = (short *) malloc(rows*cols* sizeof(short))) == NULL){
-      fprintf(stderr, "Error allocating the delta_x image.\n");
-      exit(1);
-   }
+    int r, c, pos;
+    /****************************************************************************
+    * Allocate images to store the derivatives.
+    ****************************************************************************/
+    if (((*delta_x) = (short *) malloc(rows * cols * sizeof(short))) == NULL) {
+        fprintf(stderr, "Error allocating the delta_x image.\n");
+        exit(1);
+    }
+    if (((*delta_y) = (short *) malloc(rows * cols * sizeof(short))) == NULL) {
+        fprintf(stderr, "Error allocating the delta_x image.\n");
+        exit(1);
+    }
 
 
-   for(r=0;r<rows;r++){
-      pos = r * cols;
-      (*delta_x)[pos] = smoothedim[pos+1] - smoothedim[pos];
-      pos++;
-      for(c=1;c<(cols-1);c++,pos++){
-         (*delta_x)[pos] = smoothedim[pos+1] - smoothedim[pos-1];
-      }
-      (*delta_x)[pos] = smoothedim[pos] - smoothedim[pos-1];
-   }
+    for (r = 0; r < rows; r++) {
+        pos = r * cols;
+        (*delta_x)[pos] = smoothedim[pos + 1] - smoothedim[pos];
+        pos++;
+        for (c = 1; c < (cols - 1); c++, pos++) {
+            (*delta_x)[pos] = smoothedim[pos + 1] - smoothedim[pos - 1];
+        }
+        (*delta_x)[pos] = smoothedim[pos] - smoothedim[pos - 1];
+    }
 
-   for(c=0;c<cols;c++){
-      pos = c;
-      (*delta_y)[pos] = smoothedim[pos+cols] - smoothedim[pos];
-      pos += cols;
-      for(r=1;r<(rows-1);r++,pos+=cols){
-         (*delta_y)[pos] = smoothedim[pos+cols] - smoothedim[pos-cols];
-      }
-      (*delta_y)[pos] = smoothedim[pos] - smoothedim[pos-cols];
-   }
+    for (c = 0; c < cols; c++) {
+        pos = c;
+        (*delta_y)[pos] = smoothedim[pos + cols] - smoothedim[pos];
+        pos += cols;
+        for (r = 1; r < (rows - 1); r++, pos += cols) {
+            (*delta_y)[pos] = smoothedim[pos + cols] - smoothedim[pos - cols];
+        }
+        (*delta_y)[pos] = smoothedim[pos] - smoothedim[pos - cols];
+    }
 }
 
 /*******************************************************************************
@@ -424,7 +407,7 @@ void derrivative_x_y(short int *smoothedim, int rows, int cols,
 * NAME: Mike Heath
 * DATE: 2/15/96
 *******************************************************************************/
-short int* gaussian_smooth(unsigned char *image, int rows, int cols, float sigma)
+short int *gaussian_smooth(unsigned char *image, int rows, int cols, float sigma)
 {
     int r, c, rr, cc,     /* Counter variables. */
         windowsize,        /* Dimension of the gaussian kernel. */
@@ -437,7 +420,7 @@ short int* gaussian_smooth(unsigned char *image, int rows, int cols, float sigma
     /****************************************************************************
     * Create a 1-dimensional gaussian smoothing kernel.
     ****************************************************************************/
-    if(VERBOSE) printf("   Computing the gaussian smoothing kernel.\n");
+    if (VERBOSE) { printf("   Computing the gaussian smoothing kernel.\n"); }
     make_gaussian_kernel(sigma, &kernel, &windowsize);
     center = windowsize / 2;
 
@@ -445,14 +428,12 @@ short int* gaussian_smooth(unsigned char *image, int rows, int cols, float sigma
     /****************************************************************************
     * Allocate a temporary buffer image and the smoothed image.
     ****************************************************************************/
-    if((tempim = (float *) malloc(rows*cols* sizeof(float))) == NULL)
-    {
+    if ((tempim = (float *) malloc(rows * cols * sizeof(float))) == NULL) {
         fprintf(stderr, "Error allocating the buffer image.\n");
         exit(1);
     }
-    short int* smoothedim;
-    if(((smoothedim) = (short int *) malloc(rows*cols*sizeof(short int))) == NULL)
-    {
+    short int *smoothedim;
+    if (((smoothedim) = (short int *) malloc(rows * cols * sizeof(short int))) == NULL) {
         fprintf(stderr, "Error allocating the smoothed image.\n");
         exit(1);
     }
@@ -461,22 +442,18 @@ short int* gaussian_smooth(unsigned char *image, int rows, int cols, float sigma
     /****************************************************************************
     * Blur in the x - direction.
     ****************************************************************************/
-    if(VERBOSE) printf("   Bluring the image in the X-direction.\n");
-    for(r=0; r<rows; r++)
-    {
-        for(c=0; c<cols; c++)
-        {
+    if (VERBOSE) { printf("   Bluring the image in the X-direction.\n"); }
+    for (r = 0; r < rows; r++) {
+        for (c = 0; c < cols; c++) {
             dot = 0.0;
             sum = 0.0;
-            for(cc=(-center); cc<=center; cc++)
-            {
-                if(((c+cc) >= 0) && ((c+cc) < cols))
-                {
-                    dot += (float)image[r*cols+(c+cc)] * kernel[center+cc];
-                    sum += kernel[center+cc];
+            for (cc = (-center); cc <= center; cc++) {
+                if (((c + cc) >= 0) && ((c + cc) < cols)) {
+                    dot += (float)image[r * cols + (c + cc)] * kernel[center + cc];
+                    sum += kernel[center + cc];
                 }
             }
-            tempim[r*cols+c] = dot/sum;
+            tempim[r * cols + c] = dot / sum;
         }
     }
     MCPROF_ZONE_EXIT(1);
@@ -485,22 +462,18 @@ short int* gaussian_smooth(unsigned char *image, int rows, int cols, float sigma
     /****************************************************************************
     * Blur in the y - direction.
     ****************************************************************************/
-    if(VERBOSE) printf("   Bluring the image in the Y-direction.\n");
-    for(c=0; c<cols; c++)
-    {
-        for(r=0; r<rows; r++)
-        {
+    if (VERBOSE) { printf("   Bluring the image in the Y-direction.\n"); }
+    for (c = 0; c < cols; c++) {
+        for (r = 0; r < rows; r++) {
             sum = 0.0;
             dot = 0.0;
-            for(rr=(-center); rr<=center; rr++)
-            {
-                if(((r+rr) >= 0) && ((r+rr) < rows))
-                {
-                    dot += tempim[(r+rr)*cols+c] * kernel[center+rr];
-                    sum += kernel[center+rr];
+            for (rr = (-center); rr <= center; rr++) {
+                if (((r + rr) >= 0) && ((r + rr) < rows)) {
+                    dot += tempim[(r + rr) * cols + c] * kernel[center + rr];
+                    sum += kernel[center + rr];
                 }
             }
-            smoothedim[r*cols+c] = (short int)(dot*BOOSTBLURFACTOR/sum + 0.5);
+            smoothedim[r * cols + c] = (short int)(dot * BOOSTBLURFACTOR / sum + 0.5);
         }
     }
     MCPROF_ZONE_EXIT(2);
@@ -519,32 +492,30 @@ short int* gaussian_smooth(unsigned char *image, int rows, int cols, float sigma
 void make_gaussian_kernel(float sigma, float **kernel, int *windowsize)
 {
     int i, center;
-    float x, fx, sum=0.0;
+    float x, fx, sum = 0.0;
 
     *windowsize = 1 + 2 * ceil(2.5 * sigma);
     center = (*windowsize) / 2;
 
-    if((*kernel = (float *) malloc((*windowsize)* sizeof(float))) == NULL)
-    {
+    if ((*kernel = (float *) malloc((*windowsize) * sizeof(float))) == NULL) {
         fprintf(stderr, "Error callocing the gaussian kernel array.\n");
         exit(1);
     }
 
-    for(i=0; i<(*windowsize); i++)
-    {
+    for (i = 0; i < (*windowsize); i++) {
         x = (float)(i - center);
-        fx = pow(2.71828, -0.5*x*x/(sigma*sigma)) / (sigma * sqrt(6.2831853));
+        fx = pow(2.71828, -0.5 * x * x / (sigma * sigma)) / (sigma * sqrt(6.2831853));
         (*kernel)[i] = fx;
         sum += fx;
     }
 
-    for(i=0; i<(*windowsize); i++) (*kernel)[i] /= sum;
+    for (i = 0; i < (*windowsize); i++) { (*kernel)[i] /= sum; }
 
-    if(VERBOSE)
-    {
+    if (VERBOSE) {
         printf("The filter coefficients are:\n");
-        for(i=0; i<(*windowsize); i++)
+        for (i = 0; i < (*windowsize); i++) {
             printf("kernel[%d] = %f\n", i, (*kernel)[i]);
+        }
     }
 }
 

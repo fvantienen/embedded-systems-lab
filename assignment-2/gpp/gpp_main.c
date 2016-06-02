@@ -16,21 +16,20 @@
  *  @modif  None
  *  ============================================================================
  */
-int main (int argc, char ** argv)
+int main(int argc, char **argv)
 {
-    Char8 * dspExecutable    = NULL;
-    Char8 * strImage         = NULL;
+    Char8 *dspExecutable    = NULL;
+    Char8 *strImage         = NULL;
 
     if (argc != 3) {
-        printf ("Usage : %s <absolute path of DSP executable> "
-           "<Image path>\n",
-           argv [0]) ;
-    }
-    else {
+        printf("Usage : %s <absolute path of DSP executable> "
+               "<Image path>\n",
+               argv [0]) ;
+    } else {
         dspExecutable    = argv[1];
         strImage         = argv[2];
 
-        canny_edge_Main (dspExecutable, strImage);
+        canny_edge_Main(dspExecutable, strImage);
     }
 
     return 0 ;
