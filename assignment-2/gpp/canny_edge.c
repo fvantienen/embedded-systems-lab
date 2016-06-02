@@ -1063,15 +1063,6 @@ STATIC void derivative_x_y_neon(short int *smoothedim, int rows, int cols, short
       delta_x[pos] = smoothedim[pos] - smoothedim[pos-1];
    }
 
-   if(*percentage >=100)
-   {
-      r =2;
-   }
-   else
-   {
-      r = rows*(100 - *percentage)/100;
-   }  
-
    printf("Computing the derivative using Neon.\n");
    for(c=0;c<cols;c+=4){
       int16x4_t vector_smoothedim_3, vector_smoothedim_4, vector_delta_y;
