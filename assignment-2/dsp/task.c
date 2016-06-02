@@ -213,7 +213,7 @@ Void Task_gaussian(Void)
                     sum += kernel[center+cc];
                 }
             }
-            tmpim[r*cols+c] = dot/sum;
+            tmpim[r*cols+c] = dot/sum+0.5;
         }
     }
 
@@ -233,7 +233,7 @@ Void Task_gaussian(Void)
                     sum += kernel[center+rr];
                 }
             }
-            temp = ((dot*90/sum));
+            temp = ((dot*90/sum)+0.5);
             smoothedim[r*cols+c] = temp;
         }
     }

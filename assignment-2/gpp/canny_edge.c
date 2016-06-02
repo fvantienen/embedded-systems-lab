@@ -31,8 +31,10 @@ extern "C" {
 /* Enable / Disable DSP/NEON */
 #define GAUSSIAN_DSP 1
 #define GUASSIAN_NEON 1
-#define DERIVATIVE_DSP 1
-#define MAGNITUDE_DSP 1
+#define DERIVATIVE_DSP 0
+#define DERIVATIVE_NEON 1
+#define MAGNITUDE_DSP 0
+#define MAGNITUDE_NEON 1
 
 /* Enable verbose printing by default */
 #ifndef VERBOSE
@@ -109,6 +111,10 @@ STATIC Void canny_edge_Magnitude(short int *delta_x, short int *delta_y, int row
 
 /* Used neon functions */
 STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Uint16 rows, Uint16 cols);
+STATIC void derivative_x_y_neon(short int *smoothedim, int rows, int cols, short int **delta_x, short int **delta_y);
+STATIC void magnitude_x_y_neon(short int *delta_x, short int *delta_y, int rows, int cols, short int *magnitude);
+STATIC void magnitude_x_y_sq_neon(short int *delta_x, short int *delta_y, int rows, int cols, int *magnitude_square);
+STATIC void magnitude_x_y_rt(int rows, int cols, int *magnitude_square, short int *magnitude);
 
 /* Used GPP functions */
 STATIC void gaussian_smooth(unsigned char *image, short int* smoothedim, int rows, int cols);
@@ -398,7 +404,7 @@ NORMAL_API DSP_STATUS canny_edge_Execute (Uint8 processorId, IN Char8 * strImage
 #if GAUSSIAN_DSP
     canny_edge_Gaussian(image, canny_edge_rows, canny_edge_cols, smoothedim, processorId);
 #elif GUASSIAN_NEON
-    gaussian_smooth_neon(image, smoothedim, canny_edge_rows, canny_edge_cols, SIGMA);
+    gaussian_smooth_neon(image, smoothedim, canny_edge_rows, canny_edge_cols);
 #else
     gaussian_smooth(image, smoothedim, canny_edge_rows, canny_edge_cols);
 #endif
@@ -407,6 +413,8 @@ NORMAL_API DSP_STATUS canny_edge_Execute (Uint8 processorId, IN Char8 * strImage
     VPRINT(" Starting derivative x, y\r\n");
 #if DERIVATIVE_DSP
     canny_edge_Derivative(smoothedim, canny_edge_rows, canny_edge_cols, delta_x, delta_y, processorId);
+#elif DERIVATIVE_NEON
+    derivative_x_y_neon(smoothedim, canny_edge_rows, canny_edge_cols, &delta_x, &delta_y);
 #else
     derivative_x_y(smoothedim, canny_edge_rows, canny_edge_cols, &delta_x, &delta_y);
 #endif
@@ -415,6 +423,8 @@ NORMAL_API DSP_STATUS canny_edge_Execute (Uint8 processorId, IN Char8 * strImage
     VPRINT(" Starting magnitude x, y\r\n");
 #if MAGNITUDE_DSP
     canny_edge_Magnitude(delta_x, delta_y, canny_edge_rows, canny_edge_cols, magnitude, processorId);
+#elif MAGNITUDE_NEON
+    magnitude_x_y_neon(delta_x, delta_y, canny_edge_rows, canny_edge_cols, magnitude);
 #else
     magnitude_x_y(delta_x, delta_y, canny_edge_rows, canny_edge_cols, magnitude);
 #endif
@@ -680,7 +690,7 @@ STATIC Void canny_edge_Gaussian(unsigned char *image, int rows, int cols, short 
     /* Check if the result is correct */
 #if VERIFY
     /* Verify gaussian smooth dsp using the GPP code */
-    gaussian_smooth(image, verify_smoothedim, canny_edge_rows, canny_edge_cols, SIGMA);
+    gaussian_smooth(image, verify_smoothedim, canny_edge_rows, canny_edge_cols);
 
     /* Check if it matches */
     for(i = 0; i < rows*cols; i++) {
@@ -997,14 +1007,168 @@ STATIC void gaussian_smooth_neon(unsigned char *image, short int* smoothedim, Ui
             fprintf(stderr, "Got incorrect guassian smooth result back! Expected %d, Got %d (i: %d)\r\n", verify_smoothedim[i], smoothedim[i], i);
         }
     }
-
-    
+ 
     fprintf(stderr, "Execution of guassian_smooth_neon was successful\r\n");
     
     free(verify_smoothedim);
 #endif
 
+}
 
+STATIC void derivative_x_y_neon(short int *smoothedim, int rows, int cols, short int **delta_x, short int **delta_y)
+{
+#if VERIFY
+    int i;
+    int derivative_neon_fail = 0; //flag
+    short int *verify_delta_x = (short int *) malloc(sizeof(short int) * rows * cols);
+    short int *verify_delta_y = (short int *) malloc(sizeof(short int) * rows * cols);
+#endif
+
+   int r, c, pos;
+   /****************************************************************************
+   * Allocate images to store the derivatives.
+   ****************************************************************************/
+   if(((*delta_x) = (short *) malloc(rows*cols* sizeof(short))) == NULL){
+      fprintf(stderr, "Error allocating the delta_x image.\n");
+      exit(1);
+   }
+   if(((*delta_y) = (short *) malloc(rows*cols* sizeof(short))) == NULL){
+      fprintf(stderr, "Error allocating the delta_y image.\n");
+      exit(1);
+   }
+
+   for(r=0;r<rows;r++){
+      pos = r * cols;
+      (*delta_x)[pos] = smoothedim[pos+1] - smoothedim[pos];
+      pos++;
+      for(c=1;c<(cols-1);c++,pos++){
+         (*delta_x)[pos] = smoothedim[pos+1] - smoothedim[pos-1];
+      }
+      (*delta_x)[pos] = smoothedim[pos] - smoothedim[pos-1];
+   }  
+
+   	printf("Computing the derivative using Neon.\n");
+    for(c=0;c<cols;c+=4){
+   	int16x4_t vector_smoothedim_3, vector_smoothedim_4, vector_delta_y;
+   	pos = c;
+	vector_smoothedim_3 = vld1_s16(&(smoothedim[pos+cols]));
+   	vector_smoothedim_4 = vld1_s16(&(smoothedim[pos]));
+   	vector_delta_y = vsub_s16(vector_smoothedim_3, vector_smoothedim_4);
+   	vst1_s16(&((*delta_y)[pos]), vector_delta_y);
+	pos += cols;
+	for(r=1;r<(rows-1);r++,pos+=cols){ 	
+   	vector_smoothedim_3 = vld1_s16(&(smoothedim[pos+cols]));
+   	vector_smoothedim_4 = vld1_s16(&(smoothedim[pos-cols]));
+   	vector_delta_y = vsub_s16(vector_smoothedim_3, vector_smoothedim_4);
+   	vst1_s16(&((*delta_y)[pos]), vector_delta_y);
+   }
+	vector_smoothedim_3 = vld1_s16(&(smoothedim[pos]));
+   	vector_smoothedim_4 = vld1_s16(&(smoothedim[pos-cols]));
+   	vector_delta_y = vsub_s16(vector_smoothedim_3, vector_smoothedim_4);
+   	vst1_s16(&((*delta_y)[pos]), vector_delta_y);
+   }
+
+#if VERIFY
+    /* verify with GPP function */
+    derivative_x_y(smoothedim, rows, cols, &verify_delta_x, &verify_delta_y);
+  
+    /* Check for delta_x*/
+    for(i = 0; i < rows*cols; i++) {
+        if((*delta_x)[i] != verify_delta_x[i]) {
+            fprintf(stderr, "Got incorrect delta_x using Neon! Expected %d, Got %d (i: %d)\r\n", verify_delta_x[i], (*delta_x)[i], i);
+            derivative_neon_fail = 1;
+        }
+    }
+
+    /* Check for delta_y*/
+    for(i = 0; i < rows*cols; i++) {
+        if((*delta_y)[i] != verify_delta_y[i]) {
+            fprintf(stderr, "Got incorrect delta_y using Neon! Expected %d, Got %d (i: %d)\r\n", verify_delta_y[i], (*delta_y)[i], i);
+            derivative_neon_fail = 1;
+        }
+    }
+
+    /* Print if verify was succesfull */
+    if(derivative_neon_fail == 0) {
+        VPRINT("Execution of derivative_x_y_neon was succesfull!\r\n");
+    }
+    else {
+        fprintf(stderr, "Execution of derivative_x_y_neon was FAILED!\r\n");
+    }
+
+    free(verify_delta_x);
+    free(verify_delta_y);
+#endif
+
+}
+
+STATIC void magnitude_x_y_neon(short int *delta_x, short int *delta_y, int rows, int cols, short int *magnitude)
+{
+#if VERIFY
+	int i; // for counting
+	int magnitude_neon_fail = 0; // flag for failure
+    short int *verify_magnitude=(short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
+#endif
+
+	int *magnitude_square = (int *)malloc(sizeof(int) * rows * cols);
+	magnitude_x_y_sq_neon(delta_x, delta_y, rows, cols, magnitude_square);
+	magnitude_x_y_rt(rows, cols, magnitude_square, magnitude);
+	free(magnitude_square);
+
+#if VERIFY
+    /* Verify magnitude_x_y_neon using the GPP code */
+    magnitude_x_y(delta_x, delta_y, rows, cols, verify_magnitude);
+
+    /* Check if it matches */
+    for(i = 0; i < rows*cols; i++) {
+        if(magnitude[i] != verify_magnitude[i]) {
+            fprintf(stderr, "Got incorrect magnitude result back! Expected %d, Got %d (i: %d)\r\n", verify_magnitude[i], magnitude[i], i);
+            magnitude_neon_fail = 1;
+        }
+    }
+ 
+    if(magnitude_neon_fail) {
+        VPRINT("Execution of magnitude_x_y_neon FAILED!\r\n");
+    }
+    else {
+        fprintf(stderr, "Execution of magnitude_x_y_neon was successful!\r\n");
+    }
+
+    free(verify_magnitude);
+#endif
+}
+
+STATIC void magnitude_x_y_sq_neon(short int *delta_x, short int *delta_y, int rows, int cols, int *magnitude_square)
+{
+    int r, c, pos;
+    printf("Computing the squared magnitude using Neon.\n");
+    for(r=0,pos=0; r<rows; r++)
+    {
+        for(c=0; c<cols; c+=4)
+        {
+            int16x4_t vector_delta_x, vector_delta_y;
+            int32x4_t vector_delta_x_sq, vector_delta_y_sq, vector_magnitude_square;
+            vector_delta_x = vld1_s16(&(delta_x[pos]));
+            vector_delta_y = vld1_s16(&(delta_y[pos]));
+            vector_delta_x_sq = vmull_s16(vector_delta_x, vector_delta_x);
+            vector_delta_y_sq = vmull_s16(vector_delta_y, vector_delta_y);
+            vector_magnitude_square = vaddq_s32(vector_delta_x_sq, vector_delta_y_sq);
+            vst1q_s32 (&magnitude_square[pos], vector_magnitude_square);
+            pos += 4;
+        }
+    }
+}
+
+STATIC void magnitude_x_y_rt(int rows, int cols, int *magnitude_square, short int *magnitude)
+{
+    int r, c, pos;
+    for(r=0,pos=0; r<rows; r++)
+    {
+        for(c=0; c<cols; c++,pos++)
+        {
+            magnitude[pos] = (short)(0.5 + sqrt((float)magnitude_square[pos]));
+        }
+    }
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////
