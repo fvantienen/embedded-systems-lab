@@ -15,12 +15,14 @@ orig:
 	cd orig; make remote && make fetch; cd ..
 
 send:
+	scp -r ./run.sh root@$(REMOTE_BB):$(BEAGLE_DIR)/
 	cd dsp; R=$(R) make send; cd ..
 	cd gpp; R=$(R) make send; cd ..
 	cd orig; R=$(R) make send; cd ..
 
 fetch:
 	scp -r root@$(REMOTE_BB):$(BEAGLE_DIR)/pics/klomp.pgm_out.pgm ./
+	scp -r root@$(REMOTE_BB):$(BEAGLE_DIR)/output.csv ./
 
 access:
 	ssh -R2230:$(REMOTE_BB):22 $(REMOTE_ESL)

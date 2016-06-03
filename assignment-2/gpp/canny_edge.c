@@ -33,26 +33,23 @@ extern "C" {
 #define DO_WRITEBACK 0 /* Write back the image from the DSP with 1 added to each pixel */
 
 #define GAUSSIAN_PARALLEL 1         /* Enable to use DSP & GPP/NEON in parallel */
-#define GAUSSIAN_PERCENTAGE 50      /* Percentage to calculate on the GPP */
 #define GUASSIAN_NEON 1             /* Enable to use NEON instead of GPP */
 
 #define MAGNITUDE_PARALLEL 1        /* Enable to use DSP & GPP/NEON in parallel */
-#define MAGNITUDE_PERCENTAGE 50     /* Percentage to calculate on the GPP */
 #define MAGNITUDE_NEON 1            /* Enable to use NEON instead of GPP */
 
 #define DERIVATIVE_PARALLEL 1       /* Enable to use DSP & GPP/NEON in parallel */
-#define DERIVATIVE_PERCENTAGE 50    /* Percentage to calculate on the GPP */
 #define DERIVATIVE_NEON 1           /* Enable to use NEON instead of GPP */
 
 /* Enable verbose printing by default */
 #ifndef VERBOSE
-#define VERBOSE 1
+#define VERBOSE 0
 #endif
 #define VPRINT if(VERBOSE) printf
 
 /* Enable verify by default (makes it slower) */
 #ifndef VERIFY
-#define VERIFY 1
+#define VERIFY 0
 #endif
 
 /* Pool and message defines */
@@ -403,7 +400,7 @@ NORMAL_API DSP_STATUS canny_edge_Execute(Uint8 processorId, IN Char8 *strImage)
 
     /* Do the guassian smoothing */
     VPRINT(" Starting guassian smoothing\r\n");
-    *percentage = GAUSSIAN_PERCENTAGE;
+    *percentage = gaussianPerc;
     POOL_writeback(POOL_makePoolId(processorId, SAMPLE_POOL_ID), percentage, buffer_sizes[5]);
 #if GAUSSIAN_PARALLEL
     canny_edge_Gaussian(image, canny_edge_rows, canny_edge_cols, smoothedim, percentage, processorId);
@@ -413,7 +410,7 @@ NORMAL_API DSP_STATUS canny_edge_Execute(Uint8 processorId, IN Char8 *strImage)
 
     /* Calculate the derivatives */
     VPRINT(" Starting derivative x, y\r\n");
-    *percentage = DERIVATIVE_PERCENTAGE;
+    *percentage = derivativePerc;
     POOL_writeback(POOL_makePoolId(processorId, SAMPLE_POOL_ID), percentage, buffer_sizes[5]);
 #if DERIVATIVE_PARALLEL
     canny_edge_Derivative(smoothedim, canny_edge_rows, canny_edge_cols, delta_x, delta_y, percentage, processorId);
@@ -423,7 +420,7 @@ NORMAL_API DSP_STATUS canny_edge_Execute(Uint8 processorId, IN Char8 *strImage)
 
     /* Compute the magnitude */
     VPRINT(" Starting magnitude x, y\r\n");
-    *percentage = MAGNITUDE_PERCENTAGE;
+    *percentage = magnitudePerc;
     POOL_writeback(POOL_makePoolId(processorId, SAMPLE_POOL_ID), percentage, buffer_sizes[5]);
 #if MAGNITUDE_PARALLEL
     canny_edge_Magnitude(delta_x, delta_y, canny_edge_rows, canny_edge_cols, magnitude, percentage, processorId);
@@ -440,7 +437,8 @@ NORMAL_API DSP_STATUS canny_edge_Execute(Uint8 processorId, IN Char8 *strImage)
     apply_hysteresis(magnitude, nms, canny_edge_rows, canny_edge_cols, TLOW, THIGH, edge);
 
     /* Stop the timer and return */
-    printf("Canny edge took %lld us.\n", (get_usec() - start_time));
+    if(VERBOSE) printf("Canny edge took %lld us.\n", (get_usec() - start_time));
+    else printf("%d, %d, %d, %lld\r\n", gaussianPerc, derivativePerc, magnitudePerc, (get_usec() - start_time));
 
     /* Save the image */
     sprintf(outfilename, "%s_out.pgm", strImage);

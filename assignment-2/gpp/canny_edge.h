@@ -4,6 +4,7 @@
 /*  ----------------------------------- DSP/BIOS Link                 */
 #include <dsplink.h>
 
+extern int gaussianPerc, derivativePerc, magnitudePerc;
 
 /** ============================================================================
  *  @const  ID_PROCESSOR
