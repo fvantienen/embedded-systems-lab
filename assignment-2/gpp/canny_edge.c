@@ -19,9 +19,10 @@
 #include <canny_edge.h>
 #include <math.h>
 #include <string.h>
+#include <arm_neon.h>
+#include <sys/time.h>
 #include "pgm_io.h"
 #include "hysteresis.h"
-#include <arm_neon.h>
 
 
 #if defined (__cplusplus)
@@ -29,16 +30,19 @@ extern "C" {
 #endif /* defined (__cplusplus) */
 
 /* Enable / Disable DSP/NEON */
-#define GAUSSIAN_DSP 0
-#define GUASSIAN_NEON 0
+#define DO_WRITEBACK 0 /* Write back the image from the DSP with 1 added to each pixel */
 
-#define MAGNITUDE_PARALLEL 1 /* Enable to use DSP & GPP/NEON in parallel */
-#define MAGNITUDE_PERCENTAGE 50 /* Percentage to calculate on the GPP*/
-#define MAGNITUDE_NEON 1 /* Enable to use NEON instead of GPP */
+#define GAUSSIAN_PARALLEL 1         /* Enable to use DSP & GPP/NEON in parallel */
+#define GAUSSIAN_PERCENTAGE 50      /* Percentage to calculate on the GPP */
+#define GUASSIAN_NEON 1             /* Enable to use NEON instead of GPP */
 
-#define DERIVATIVE_PARALLEL 1 /* Enable to use DSP & GPP/NEON in parallel */
-#define DERIVATIVE_PERCENTAGE 50 /* Percentage to calculate on the GPP*/
-#define DERIVATIVE_NEON 1 /* Enable to use NEON instead of GPP */
+#define MAGNITUDE_PARALLEL 1        /* Enable to use DSP & GPP/NEON in parallel */
+#define MAGNITUDE_PERCENTAGE 50     /* Percentage to calculate on the GPP */
+#define MAGNITUDE_NEON 1            /* Enable to use NEON instead of GPP */
+
+#define DERIVATIVE_PARALLEL 1       /* Enable to use DSP & GPP/NEON in parallel */
+#define DERIVATIVE_PERCENTAGE 50    /* Percentage to calculate on the GPP */
+#define DERIVATIVE_NEON 0           /* Enable to use NEON instead of GPP */
 
 /* Enable verbose printing by default */
 #ifndef VERBOSE
@@ -97,8 +101,8 @@ float gaussian_kernel[] = { 0.0031742106657475233078003,  /* kernel[0] */
                             0.0444807782769203186035156,  /* kernel[11] */
                             0.0216511301696300506591797,  /* kernel[12] */
                             0.0089805237948894500732422,  /* kernel[13] */
-                            0.0031742106657475233078003
-                          }; /* kernel[14] */
+                            0.0031742106657475233078003   /* kernel[14] */
+                          }; 
 int windowsize_kernel = 15; /* Dimension of the gaussian kernel. */
 
 
@@ -111,21 +115,22 @@ int windowsize_kernel = 15; /* Dimension of the gaussian kernel. */
 /* Used DSP functions */
 STATIC Void canny_edge_Notify(Uint32 eventNo, Pvoid arg, Pvoid info);
 STATIC Void canny_edge_Writeback(unsigned char *image, int rows, int cols, Uint8 processorId);
-STATIC Void canny_edge_Gaussian(unsigned char *image, int rows, int cols, short int *smoothedim, Uint8 processorId);
+STATIC Void canny_edge_Gaussian(unsigned char *image, int rows, int cols, short int *smoothedim, short int *percentage, Uint8 processorId);
 STATIC Void canny_edge_Derivative(short int *smoothedim, int rows, int cols, short int *delta_x, short int *delta_y,
                                   short int *percentage, Uint8 processorId);
 STATIC Void canny_edge_Magnitude(short int *delta_x, short int *delta_y, int rows, int cols, short int *magnitude,
                                  short int *percentage, Uint8 processorId);
 
 /* Used neon functions */
-STATIC void gaussian_smooth_neon(unsigned char *image, short int *smoothedim, Uint16 rows, Uint16 cols);
+STATIC void gaussian_smooth_neon(unsigned char *image, short int *smoothedim, Uint16 rows, Uint16 cols, short int *percentage);
 STATIC void derivative_x_y_neon(short int *smoothedim, int rows, int cols, short int *delta_x, short int *delta_y,
                                 short int *percentage);
 STATIC void magnitude_x_y_neon(short int *delta_x, short int *delta_y, int rows, int cols, short int *magnitude,
                                short int *percentage);
 
 /* Used GPP functions */
-STATIC void gaussian_smooth(unsigned char *image, short int *smoothedim, int rows, int cols);
+STATIC long long get_usec(void);
+STATIC void gaussian_smooth(unsigned char *image, short int *smoothedim, int rows, int cols, short int *percentage);
 STATIC void make_gaussian_kernel(float sigma, float **kernel, int *windowsize);
 STATIC void magnitude_x_y(short int *delta_x, short int *delta_y, int rows, int cols, short int *magnitude,
                           short int *percentage);
@@ -329,12 +334,8 @@ NORMAL_API DSP_STATUS canny_edge_Create(IN Char8 *dspExecutable,
     return status;
 }
 
-
-#include <sys/time.h>
-
-long long get_usec(void);
-
-long long get_usec(void)
+/* Get the time in nano seconds */
+STATIC long long get_usec(void)
 {
     long long r;
     struct timeval t;
@@ -402,18 +403,18 @@ NORMAL_API DSP_STATUS canny_edge_Execute(Uint8 processorId, IN Char8 *strImage)
 
     /* Do the guassian smoothing */
     VPRINT(" Starting guassian smoothing\r\n");
-#if GAUSSIAN_DSP
-    canny_edge_Gaussian(image, canny_edge_rows, canny_edge_cols, smoothedim, processorId);
-#elif GUASSIAN_NEON
-    gaussian_smooth_neon(image, smoothedim, canny_edge_rows, canny_edge_cols);
+    *percentage = GAUSSIAN_PERCENTAGE;
+    POOL_writeback(POOL_makePoolId(processorId, SAMPLE_POOL_ID), percentage, buffer_sizes[5]);
+#if GAUSSIAN_PARALLEL
+    canny_edge_Gaussian(image, canny_edge_rows, canny_edge_cols, smoothedim, percentage, processorId);
 #else
-    gaussian_smooth(image, smoothedim, canny_edge_rows, canny_edge_cols);
+    gaussian_smooth(image, smoothedim, canny_edge_rows, canny_edge_cols, percentage);
 #endif
 
-// derivative_x_y_neon(smoothedim, canny_edge_rows, canny_edge_cols, delta_x, delta_y, percentage);
     /* Calculate the derivatives */
     VPRINT(" Starting derivative x, y\r\n");
     *percentage = DERIVATIVE_PERCENTAGE;
+    POOL_writeback(POOL_makePoolId(processorId, SAMPLE_POOL_ID), percentage, buffer_sizes[5]);
 #if DERIVATIVE_PARALLEL
     canny_edge_Derivative(smoothedim, canny_edge_rows, canny_edge_cols, delta_x, delta_y, percentage, processorId);
 #else
@@ -492,7 +493,6 @@ NORMAL_API Void canny_edge_Delete(Uint8 processorId)
 
     /* Free the canny edge image */
     free(canny_edge_image);
-    //free(gaussian_kernel);
 
     /*
      *  Stop execution on DSP.
@@ -659,7 +659,7 @@ STATIC Void canny_edge_Writeback(unsigned char *image, int rows, int cols, Uint8
 #endif
 }
 
-STATIC Void canny_edge_Gaussian(unsigned char *image, int rows, int cols, short int *smoothedim, Uint8 processorId)
+STATIC Void canny_edge_Gaussian(unsigned char *image, int rows, int cols, short int *smoothedim, short int *percentage, Uint8 processorId)
 {
 #if VERIFY
     int i;
@@ -675,6 +675,13 @@ STATIC Void canny_edge_Gaussian(unsigned char *image, int rows, int cols, short 
     NOTIFY_notify(processorId, canny_edge_IPS_ID, canny_edge_IPS_EVENTNO, canny_edge_GAUSSIAN);
     VPRINT("  DSP_Gaussian send, waiting for response...\r\n");
 
+    /* */
+#if GUASSIAN_NEON
+    gaussian_smooth_neon(image, smoothedim, rows, cols, percentage);
+#else
+    gaussian_smooth(image, smoothedim, rows, cols, percentage);
+#endif
+
     /* Wait for the response */
     sem_wait(&sem);
 
@@ -683,10 +690,10 @@ STATIC Void canny_edge_Gaussian(unsigned char *image, int rows, int cols, short 
                     smoothedim,
                     buffer_sizes[1]);
 
-    /* Check if the result is correct */
 #if VERIFY
     /* Verify gaussian smooth dsp using the GPP code */
-    gaussian_smooth(image, verify_smoothedim, canny_edge_rows, canny_edge_cols);
+    *percentage = 100;
+    gaussian_smooth(image, verify_smoothedim, canny_edge_rows, canny_edge_cols, percentage);
 
     /* Check if it matches */
     for (i = 0; i < rows * cols; i++) {
@@ -849,26 +856,22 @@ STATIC Void canny_edge_Magnitude(short int *delta_x, short int *delta_y, int row
 //////////////////////////////////////////////////////////////////////////////////////////
 
 /* Guassian smooth on Neon */
-STATIC void gaussian_smooth_neon(unsigned char *image, short int *smoothedim, Uint16 rows, Uint16 cols)
+STATIC void gaussian_smooth_neon(unsigned char *image, short int *smoothedim, Uint16 rows, Uint16 cols, short int *percentage)
 {
-#if VERIFY
-    short int *verify_smoothedim = (short int *)malloc(sizeof(short int) * canny_edge_rows * canny_edge_cols);
-    int status = DSP_SOK;
-#endif
-
     float *tempim;                          /* Intermediate storing memory for x-direction*/
     float *rows_image;                     /* Image for x-smoothing*/
     float *cols_image;                    /*  Image for y-smoothing*/
     float neon_kernel[17];               /* New kernel for neon */
     unsigned int neon_cols = cols + 16; /* Cols value for x-direction*/
     unsigned int neon_rows = rows + 16; /* Rows value for y-direction*/
-    unsigned int i, k, a, c, r, j, b; /*Loop variant*/
+    int i, k, a, c, r, j, b; /*Loop variant*/
     float32x4_t neon_pixel;       /* Four consecutive pixel values */
     float32x4_t neon_factor;      /* Four consecutive filter values */
     float32x4_t temp_dot;         /* The neon multiplication result store here */
     float dot = 0.0f;             /* The sum of pixel values */
     float Referkernel = 0.0f;      /* Intermediate sum of filter values considering boundary situation */
     float sum = 0.0f;             /* The sum of filter values */
+    unsigned int row_start = rows * (100 - *percentage) / 100;
 
     /****************************************************************************
     * Allocate a temporary buffer image and the smoothed image.
@@ -882,7 +885,7 @@ STATIC void gaussian_smooth_neon(unsigned char *image, short int *smoothedim, Ui
     * Define the new kernel and referenced kernel in boundary case.
     ****************************************************************************/
 
-    for (b = 0 ; b <= 16 ; b++) {
+    for (b = 0; b <= 16; b++) {
         if (b > 0 && b < 16) {
             neon_kernel[b] = gaussian_kernel[b - 1];
         } else {
@@ -899,7 +902,10 @@ STATIC void gaussian_smooth_neon(unsigned char *image, short int *smoothedim, Ui
     VPRINT("   Bluring the image in the X-direction.\n");
     /* Allocate the memory to new image and set the boundary value as 0. */
     rows_image = (float *)malloc(neon_cols * rows * sizeof(float));
-    for (i = 0; i < rows; i++) {
+    i = row_start - 8;
+    if(i < 0)
+        i = 0;
+    for (; i < rows; i++) {
         /* Set the front end 8 pixels' value as 0*/
         memset(&rows_image[i * neon_cols], 0, 8 * sizeof(float));
 
@@ -910,7 +916,10 @@ STATIC void gaussian_smooth_neon(unsigned char *image, short int *smoothedim, Ui
         memset(&rows_image[i * neon_cols + 8 + cols], 0, 8 * sizeof(float));
     }
 
-    for (r = 0; r < rows; r++) {
+    r = row_start - 8;
+    if(r < 0)
+        r = 0;
+    for (; r < rows; r++) {
         for (c = 0; c < cols; c++) {
             /* Assign different sum value according to pixel position */
             if (c == 0) {
@@ -920,6 +929,7 @@ STATIC void gaussian_smooth_neon(unsigned char *image, short int *smoothedim, Ui
             } else if (c >= cols - 8) {
                 sum -= neon_kernel[cols - c + 8];
             }
+
             /*Calculate the middle pixel value based on neon.*/
             temp_dot = vdupq_n_f32(0);
             for (j = 0; j <= 3; j++) {
@@ -954,16 +964,33 @@ STATIC void gaussian_smooth_neon(unsigned char *image, short int *smoothedim, Ui
     for (i = 0; i < cols; i++) {
         /* Set the front end 8 pixels' value as 0*/
         memset(&cols_image[i * neon_rows], 0, 8 * sizeof(float));
-        for (k = 0; k < rows; k++) {
+        for (k = row_start; k < rows; k++) {
             cols_image[i * neon_rows + 8 + k] = tempim[k * cols + i];
         }
         /* Set the back end 8 pixels' value as 0*/
         memset(&cols_image[i * neon_rows + 8 + rows], 0, 8 * sizeof(float));
     }
 
-
     for (c = 0; c < cols; c++) {
-        for (r = 0; r < rows; r++) {
+        /* Fix sum for percentage */
+        sum = Referkernel;
+        if(row_start < 9) {
+            for(r = 1; r < row_start; r++) {
+                sum += neon_kernel[8 - r];
+            }
+        }
+        else if(row_start > 9 && row_start < (rows - 9)) {
+            for(r = 1; r < 9; r++) {
+                sum += neon_kernel[8 - r];
+            }
+        }
+        else {
+            for(r = (rows - 8); r < row_start; r++) {
+                sum -= neon_kernel[rows - r + 8];
+            }
+        }
+
+        for (r = row_start; r < rows; r++) {
             /* Assign different sum value according to pixel position */
             if (r == 0) {
                 sum = Referkernel;
@@ -995,46 +1022,16 @@ STATIC void gaussian_smooth_neon(unsigned char *image, short int *smoothedim, Ui
             smoothedim[r * cols + c] = (short int)(dot * BOOSTBLURFACTOR / sum + 0.5);
         }
     }
+
     /* Free the memory zone*/
     free(rows_image);
     free(cols_image);
     free(tempim);
-
-#if VERIFY
-    /* Verify guassian smooth neon using the GPP code */
-    gaussian_smooth(image, verify_smoothedim, canny_edge_rows, canny_edge_cols);
-
-    /* Check if it matches */
-    for (i = 0; i < rows * cols; i++) {
-        if (smoothedim[i] != verify_smoothedim[i]) {
-            fprintf(stderr, "Got incorrect guassian smooth result back! Expected %d, Got %d (i: %d)\r\n", verify_smoothedim[i],
-                    smoothedim[i], i);
-            status = DSP_EFAIL;
-        }
-    }
-
-    /* Print final verdict */
-    if (DSP_SUCCEEDED(status)) {
-        VPRINT("Execution of guassian_smooth_neon was succesfull!\r\n");
-    } else {
-        fprintf(stderr, "Execution of guassian_smooth_neon FAILED!\r\n");
-    }
-
-    free(verify_smoothedim);
-#endif
-
 }
 
 STATIC void derivative_x_y_neon(short int *smoothedim, int rows, int cols, short int *delta_x, short int *delta_y,
                                 short int *percentage)
 {
-#if VERIFY
-    int i;
-    int status = DSP_SOK;
-    short int *verify_delta_x = (short int *) malloc(sizeof(short int) * rows * cols);
-    short int *verify_delta_y = (short int *) malloc(sizeof(short int) * rows * cols);
-#endif
-
     int r, c, pos;
     /****************************************************************************
     * Allocate images to store the derivatives.
@@ -1093,39 +1090,6 @@ STATIC void derivative_x_y_neon(short int *smoothedim, int rows, int cols, short
         vector_delta_y = vsub_s16(vector_smoothedim_3, vector_smoothedim_4);
         vst1_s16(&(delta_y[pos]), vector_delta_y);
     }
-
-#if VERIFY
-    /* verify with GPP function */
-    *percentage = 100;
-    derivative_x_y(smoothedim, rows, cols, verify_delta_x, verify_delta_y, percentage);
-
-    /* Check for delta_x*/
-    for (i = 0; i < rows * cols; i++) {
-        if (delta_x[i] != verify_delta_x[i]) {
-            fprintf(stderr, "Got incorrect delta_x using Neon! Expected %d, Got %d (i: %d)\r\n", verify_delta_x[i], delta_x[i], i);
-            status = DSP_EFAIL;
-        }
-    }
-
-    /* Check for delta_y*/
-    for (i = 0; i < rows * cols; i++) {
-        if (delta_y[i] != verify_delta_y[i]) {
-            fprintf(stderr, "Got incorrect delta_y using Neon! Expected %d, Got %d (i: %d)\r\n", verify_delta_y[i], delta_y[i], i);
-            status = DSP_EFAIL;
-        }
-    }
-
-    /* Print final verdict */
-    if (DSP_SUCCEEDED(status)) {
-        VPRINT("Execution of derivative_x_y_neon was succesfull!\r\n");
-    } else {
-        fprintf(stderr, "Execution of derivative_x_y_neon FAILED!\r\n");
-    }
-
-    free(verify_delta_x);
-    free(verify_delta_y);
-#endif
-
 }
 
 STATIC void magnitude_x_y_neon(short int *delta_x, short int *delta_y, int rows, int cols, short int *magnitude,
@@ -1256,7 +1220,7 @@ STATIC void derivative_x_y(short int *smoothedim, int rows, int cols, short int 
 * NAME: Mike Heath
 * DATE: 2/15/96
 *******************************************************************************/
-STATIC void gaussian_smooth(unsigned char *image, short int *smoothedim, int rows, int cols)
+STATIC void gaussian_smooth(unsigned char *image, short int *smoothedim, int rows, int cols, short int *percentage)
 {
     int r, c, rr, cc,     /* Counter variables. */
         center;            /* Half of the windowsize. */
@@ -1279,7 +1243,10 @@ STATIC void gaussian_smooth(unsigned char *image, short int *smoothedim, int row
     * Blur in the x - direction.
     ****************************************************************************/
     VPRINT("   Bluring the image in the X-direction.\n");
-    for (r = 0; r < rows; r++) {
+    r = rows*(100- *percentage)/100 -8;
+    if(r < 0)
+        r = 0;
+    for (; r < rows; r++) {
         for (c = 0; c < cols; c++) {
             dot = 0.0;
             sum = 0.0;
@@ -1298,7 +1265,7 @@ STATIC void gaussian_smooth(unsigned char *image, short int *smoothedim, int row
     ****************************************************************************/
     VPRINT("   Bluring the image in the Y-direction.\n");
     for (c = 0; c < cols; c++) {
-        for (r = 0; r < rows; r++) {
+        for (r = rows*(100- *percentage)/100; r < rows; r++) {
             sum = 0.0;
             dot = 0.0;
             for (rr = (-center); rr <= center; rr++) {

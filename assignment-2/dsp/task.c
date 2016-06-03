@@ -163,7 +163,8 @@ Void Task_gaussian(Void)
         center;
     unsigned int dot,     /* Dot product summing variable. */
              sum,            /* Sum of the kernel weights variable. */
-             temp;
+             temp,
+             rows_end;
 
 
     int rows = canny_edge_rows;
@@ -171,6 +172,7 @@ Void Task_gaussian(Void)
     unsigned char *image = (unsigned char *)dsp_buffers[0][0];
     short int *smoothedim = (short int *)dsp_buffers[1][0];
     unsigned int *tmpim = (unsigned int *)dsp_buffers[4][0];
+    short int *percentage = (short int *)dsp_buffers[5][0];
 
     // unsigned char *tmpim;
     // tmpim = (unsigned char *) malloc(rows*cols* sizeof(unsigned char));
@@ -181,17 +183,28 @@ Void Task_gaussian(Void)
         15226, 19356, 20969, 19356, 15226,
         10206,  5830,  2837,  1177,  416
     };
-
     windowsize = 15;
     center = windowsize / 2;
 
-
     /* Invalidate cache */
     BCACHE_inv(dsp_buffers[0][0], buffer_sizes[0], TRUE);
+    BCACHE_inv(dsp_buffers[5][0], buffer_sizes[5], TRUE);
 
-    // Blur in x
+    /* When percentage is 100 we don't need to do anything */
+    if (*percentage >= 100) {
+        NOTIFY_notify(ID_GPP, MPCSXFER_IPS_ID, MPCSXFER_IPS_EVENTNO, canny_edge_GAUSSIAN);
+        return;
+    }
 
-    for (r = 0; r < rows; r++) {
+    /* Calculate end for x blurring */
+    rows_end = rows * (100 - *percentage) / 100;
+    if(rows_end >= rows-8)
+      rows_end = rows;
+    else
+      rows_end += 8;
+
+    /* Blur in x */
+    for (r = 0; r < rows_end; r++) {
         for (c = 0; c < cols; c++) {
             dot = 0;
             sum = 0;
@@ -201,14 +214,13 @@ Void Task_gaussian(Void)
                     sum += kernel[center + cc];
                 }
             }
-            tmpim[r * cols + c] = dot / sum + 0.5;
+            tmpim[r * cols + c] = dot * 90 / sum;
         }
     }
 
-    // Blur in y
-
+    /* Blur in y */
     for (c = 0; c < cols; c++) {
-        for (r = 0; r < rows; r++) {
+        for (r = 0; r < rows * (100 - *percentage) / 100; r++) {
             sum = 0;
             dot = 0;
             for (rr = (-center); rr <= center; rr++) {
@@ -217,13 +229,13 @@ Void Task_gaussian(Void)
                     sum += kernel[center + rr];
                 }
             }
-            temp = ((dot * 90 / sum) + 0.5);
+            temp = (dot / sum) + 0.5;
             smoothedim[r * cols + c] = temp;
         }
     }
+
     /* Write back and invalidate */
     BCACHE_wbInv(dsp_buffers[1][0], buffer_sizes[1], TRUE);
-
 
     /* Notify the GPP that DSP is done */
     NOTIFY_notify(ID_GPP, MPCSXFER_IPS_ID, MPCSXFER_IPS_EVENTNO, canny_edge_GAUSSIAN);
