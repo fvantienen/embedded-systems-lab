@@ -243,43 +243,47 @@ Void Task_gaussian(Void)
 
 Void Task_derivative(Void)
 {
-    Uint32 r, c, pos;
+    int r, c, pos, new_rows;
     short int *smoothedim = (short int *)dsp_buffers[1][0];
     short int *delta_x = (short int *)dsp_buffers[2][0];
     short int *delta_y = (short int *)dsp_buffers[3][0];
     short int *percentage = (short int *)dsp_buffers[5][0];
 
-    if (*percentage >= 100) {
-        NOTIFY_notify(ID_GPP, MPCSXFER_IPS_ID, MPCSXFER_IPS_EVENTNO, canny_edge_DERIVATIVE);
-        return;
-    }
-
     /* Invalidate cache */
     BCACHE_inv(dsp_buffers[1][0], buffer_sizes[1], TRUE);
     BCACHE_inv(dsp_buffers[5][0], buffer_sizes[5], TRUE);
 
+    new_rows = canny_edge_rows * (100 - *percentage) / 100;
+    if (*percentage >= 100 || new_rows < 1) {
+        NOTIFY_notify(ID_GPP, MPCSXFER_IPS_ID, MPCSXFER_IPS_EVENTNO, canny_edge_DERIVATIVE);
+        return;
+    }
+
     /* Calculate the X direction */
-    for (r = 0; r < canny_edge_rows * (100 - *percentage) / 100; r++) {
+    for (r = 0; r < new_rows; r++) {
         pos = r * canny_edge_cols;
-        (delta_x)[pos] = smoothedim[pos + 1] - smoothedim[pos];
+        delta_x[pos] = smoothedim[pos + 1] - smoothedim[pos];
         pos++;
         for (c = 1; c < (canny_edge_cols - 1); c++, pos++) {
-            (delta_x)[pos] = smoothedim[pos + 1] - smoothedim[pos - 1];
+            delta_x[pos] = smoothedim[pos + 1] - smoothedim[pos - 1];
         }
-        (delta_x)[pos] = smoothedim[pos] - smoothedim[pos - 1];
+        delta_x[pos] = smoothedim[pos] - smoothedim[pos - 1];
     }
 
     /* Calculate the Y direction */
-    for (c = 0; c < canny_edge_cols * (100 - *percentage) / 100; c++) {
+    for (c = 0; c < canny_edge_cols; c++) {
         pos = c;
         delta_y[pos] = smoothedim[pos + canny_edge_cols] - smoothedim[pos];
         pos += canny_edge_cols;
-        for (r = 1; r < (canny_edge_rows - 1); r++, pos += canny_edge_cols) {
+        for (r = 1; r < (new_rows - 1); r++, pos += canny_edge_cols) {
             delta_y[pos] = smoothedim[pos + canny_edge_cols] - smoothedim[pos - canny_edge_cols];
         }
-        delta_y[pos] = smoothedim[pos] - smoothedim[pos - canny_edge_cols];
+        if(new_rows < canny_edge_rows)
+          delta_y[pos] = smoothedim[pos + canny_edge_cols] - smoothedim[pos - canny_edge_cols];
+        else
+          delta_y[pos] = smoothedim[pos] - smoothedim[pos - canny_edge_cols];
     }
-    NOTIFY_notify(ID_GPP, MPCSXFER_IPS_ID, MPCSXFER_IPS_EVENTNO, *percentage);
+    
     /* Write back and invalidate */
     BCACHE_wbInv(dsp_buffers[2][0], buffer_sizes[2], TRUE);
     BCACHE_wbInv(dsp_buffers[3][0], buffer_sizes[3], TRUE);
