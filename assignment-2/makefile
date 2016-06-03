@@ -22,7 +22,7 @@ send:
 
 fetch:
 	scp -r root@$(REMOTE_BB):$(BEAGLE_DIR)/pics/klomp.pgm_out.pgm ./
-	scp -r root@$(REMOTE_BB):$(BEAGLE_DIR)/output.csv ./
+	scp -r root@$(REMOTE_BB):$(BEAGLE_DIR)/*.csv ./
 
 access:
 	ssh -R2230:$(REMOTE_BB):22 $(REMOTE_ESL)
