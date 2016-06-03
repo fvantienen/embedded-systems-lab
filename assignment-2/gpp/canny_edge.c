@@ -33,9 +33,9 @@ extern "C" {
 #define DO_WRITEBACK 0 /* Write back the image from the DSP with 1 added to each pixel */
 
 #define GAUSSIAN_PARALLEL 1         /* Enable to use DSP & GPP/NEON in parallel */
-#define GUASSIAN_NEON 1             /* Enable to use NEON instead of GPP */
+#define GAUSSIAN_NEON 1             /* Enable to use NEON instead of GPP */
 
-#define MAGNITUDE_PARALLEL 1        /* Enable to use DSP & GPP/NEON in parallel */
+#define MAGNITUDE_PARALLEL 0        /* Enable to use DSP & GPP/NEON in parallel */
 #define MAGNITUDE_NEON 1            /* Enable to use NEON instead of GPP */
 
 #define DERIVATIVE_PARALLEL 1       /* Enable to use DSP & GPP/NEON in parallel */
@@ -398,12 +398,14 @@ NORMAL_API DSP_STATUS canny_edge_Execute(Uint8 processorId, IN Char8 *strImage)
     }
 #endif
 
-    /* Do the guassian smoothing */
-    VPRINT(" Starting guassian smoothing\r\n");
+    /* Do the gaussian smoothing */
+    VPRINT(" Starting gaussian smoothing\r\n");
     *percentage = gaussianPerc;
     POOL_writeback(POOL_makePoolId(processorId, SAMPLE_POOL_ID), percentage, buffer_sizes[5]);
 #if GAUSSIAN_PARALLEL
     canny_edge_Gaussian(image, canny_edge_rows, canny_edge_cols, smoothedim, percentage, processorId);
+#elif GAUSSIAN_NEON
+    gaussian_smooth_neon(image, smoothedim, canny_edge_rows, canny_edge_cols, percentage);
 #else
     gaussian_smooth(image, smoothedim, canny_edge_rows, canny_edge_cols, percentage);
 #endif
@@ -414,6 +416,8 @@ NORMAL_API DSP_STATUS canny_edge_Execute(Uint8 processorId, IN Char8 *strImage)
     POOL_writeback(POOL_makePoolId(processorId, SAMPLE_POOL_ID), percentage, buffer_sizes[5]);
 #if DERIVATIVE_PARALLEL
     canny_edge_Derivative(smoothedim, canny_edge_rows, canny_edge_cols, delta_x, delta_y, percentage, processorId);
+#elif DERIVATIVE_NEON
+    derivative_x_y_neon(smoothedim, canny_edge_rows, canny_edge_cols, delta_x, delta_y, percentage);
 #else
     derivative_x_y(smoothedim, canny_edge_rows, canny_edge_cols, delta_x, delta_y, percentage);
 #endif
@@ -424,6 +428,8 @@ NORMAL_API DSP_STATUS canny_edge_Execute(Uint8 processorId, IN Char8 *strImage)
     POOL_writeback(POOL_makePoolId(processorId, SAMPLE_POOL_ID), percentage, buffer_sizes[5]);
 #if MAGNITUDE_PARALLEL
     canny_edge_Magnitude(delta_x, delta_y, canny_edge_rows, canny_edge_cols, magnitude, percentage, processorId);
+#elif MAGNITUDE_NEON
+    magnitude_x_y_neon(delta_x, delta_y, canny_edge_rows, canny_edge_cols, magnitude, percentage);
 #else
     magnitude_x_y(delta_x, delta_y, canny_edge_rows, canny_edge_cols, magnitude, percentage);
 #endif
@@ -676,7 +682,7 @@ STATIC Void canny_edge_Gaussian(unsigned char *image, int rows, int cols, short 
     VPRINT("  DSP_Gaussian send, waiting for response...\r\n");
 
     /* Do the GPP in parallel */
-#if GUASSIAN_NEON
+#if GAUSSIAN_NEON
     gaussian_smooth_neon(image, smoothedim, rows, cols, percentage);
 #else
     gaussian_smooth(image, smoothedim, rows, cols, percentage);
