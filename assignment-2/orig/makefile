@@ -9,7 +9,7 @@ ifeq ($(CROSS_COMPILE), 1)
 	CFLAGS += -DCROSS_COMPILE
 endif
 INC = -I.
-CFLAGS +=-O2 -Wall
+CFLAGS +=-O3 -Wall -mfpu=neon
 LFLAGS = -L.
 LIBS = -lm
 LDFLAGS=
